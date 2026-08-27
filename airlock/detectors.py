@@ -324,12 +324,18 @@ def detect_findings(
                     "evidence."
                 )
                 sensor = "aggregate"
-            else:
+            elif not _check_capability_available(check, capabilities):
                 explanation = (
                     f"The {check.value.replace('_', ' ')} check was not tested because "
-                    "the required sensor or completed probe evidence was unavailable."
+                    "this case has no sensor that can observe it."
                 )
-                sensor = "unavailable"
+                sensor = "capability_absent"
+            else:
+                explanation = (
+                    f"The {check.value.replace('_', ' ')} check has a configured sensor "
+                    "but produced no completed probe evidence for this tool."
+                )
+                sensor = "evidence_missing"
             aggregate[key] = Finding(
                 tool=declaration.name,
                 check=check,
@@ -344,6 +350,20 @@ def detect_findings(
         for tool_name in sorted(declarations_by_name)
         for check in CheckName
     ]
+
+
+def _check_capability_available(
+    check: CheckName,
+    capabilities: ObservationCapabilities,
+) -> bool:
+    """Whether this case claims a sensor able to observe the check at all."""
+    if check == CheckName.INJECTED_INSTRUCTIONS:
+        return capabilities.tool_results
+    if check == CheckName.SCHEMA_DRIFT:
+        return capabilities.mcp_traffic
+    if check in {CheckName.ANNOTATION_DIVERGENCE, CheckName.SCOPE_ESCAPE}:
+        return capabilities.server_filesystem
+    return capabilities.server_egress
 
 
 def _observable_probe_count(

@@ -56,6 +56,7 @@ class AuditExecutor:
         max_catalog_bytes: int = 2 * 1024 * 1024,
         max_audit_response_bytes: int = 4 * 1024 * 1024,
         audit_operation_timeout_seconds: float = 60.0,
+        audit_total_timeout_seconds: float = 240.0,
         probe_planning_timeout_seconds: float = 5.0,
         probe_planning_memory_bytes: int = 512 * 1024 * 1024,
     ) -> None:
@@ -71,6 +72,7 @@ class AuditExecutor:
                 raise ValueError(f"{name} must be a positive integer")
         for name, value in {
             "audit_operation_timeout_seconds": audit_operation_timeout_seconds,
+            "audit_total_timeout_seconds": audit_total_timeout_seconds,
             "probe_planning_timeout_seconds": probe_planning_timeout_seconds,
         }.items():
             if (
@@ -97,6 +99,7 @@ class AuditExecutor:
         self.audit_operation_timeout_seconds = float(
             audit_operation_timeout_seconds
         )
+        self.audit_total_timeout_seconds = float(audit_total_timeout_seconds)
         self.probe_planning_timeout_seconds = float(
             probe_planning_timeout_seconds
         )
@@ -235,14 +238,19 @@ class AuditExecutor:
         observer_offset = len(observer.events) if observer is not None else 0
 
         try:
+            audit_deadline = (
+                asyncio.get_running_loop().time()
+                + self.audit_total_timeout_seconds
+            )
             async with _open_client_with_timeout(
                 target_reference,
                 binding=case.target_binding if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
-                timeout_seconds=self.audit_operation_timeout_seconds,
+                timeout_seconds=self._call_timeout(audit_deadline),
             ) as client:
                 for declaration in case.declared_tools:
+                    _remaining_operation_seconds(audit_deadline)
                     current = self.case_service.store.load_case(case_id)
                     remaining = max(0, current.probe_budget - current.probes_run)
                     if remaining == 0:
@@ -282,6 +290,7 @@ class AuditExecutor:
                             canaries=canaries,
                             observer=observer,
                             observer_offset=observer_offset,
+                            deadline=audit_deadline,
                         )
         except Exception:
             return self._record_transport_failure(
@@ -352,12 +361,16 @@ class AuditExecutor:
             self.case_service.revalidate_target(case_id)
         observer_offset = len(observer.events) if observer is not None else 0
         try:
+            audit_deadline = (
+                asyncio.get_running_loop().time()
+                + self.audit_total_timeout_seconds
+            )
             async with _open_client_with_timeout(
                 target_reference,
                 binding=case.target_binding if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
-                timeout_seconds=self.audit_operation_timeout_seconds,
+                timeout_seconds=self._call_timeout(audit_deadline),
             ) as client:
                 for item in planned:
                     observer_offset = await self._execute_probe(
@@ -367,6 +380,7 @@ class AuditExecutor:
                         canaries=canaries,
                         observer=observer,
                         observer_offset=observer_offset,
+                        deadline=audit_deadline,
                     )
         except Exception:
             return self._record_transport_failure(
@@ -410,6 +424,15 @@ class AuditExecutor:
         self.case_service.store.save_case(partial)
         return partial
 
+    def _call_timeout(self, deadline: float | None) -> float:
+        """Clamp a single call to the smaller of the per-call and audit budgets."""
+        if deadline is None:
+            return self.audit_operation_timeout_seconds
+        return min(
+            self.audit_operation_timeout_seconds,
+            _remaining_operation_seconds(deadline),
+        )
+
     async def _execute_probe(
         self,
         case_id: str,
@@ -419,6 +442,7 @@ class AuditExecutor:
         canaries: dict[str, str],
         observer: Any,
         observer_offset: int,
+        deadline: float | None = None,
     ) -> int:
         arguments_digest = _digest(probe.arguments)
         supplied_ids = [
@@ -478,7 +502,7 @@ class AuditExecutor:
                     probe.arguments,
                     meta=metadata,
                 ),
-                timeout=self.audit_operation_timeout_seconds,
+                timeout=self._call_timeout(deadline),
             )
             raw_result = result.model_dump(mode="json", by_alias=True)
             response_digest = _digest(raw_result)

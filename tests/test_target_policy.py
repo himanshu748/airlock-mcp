@@ -1,3 +1,4 @@
+import socket
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -218,4 +219,26 @@ def test_percent_encoded_hostname_is_rejected_to_avoid_parser_ambiguity():
         validate_target_url(
             "https://%65xample.com/mcp",
             resolver=lambda hostname: ["93.184.216.34"],
+        )
+
+
+def test_resolver_lookup_failure_becomes_a_target_validation_error():
+    def failing_resolver(hostname):
+        raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+    with pytest.raises(TargetValidationError, match="could not be resolved"):
+        validate_target_url(
+            "https://missing.example/mcp",
+            resolver=failing_resolver,
+        )
+
+
+def test_transient_resolver_oserror_becomes_a_target_validation_error():
+    def failing_resolver(hostname):
+        raise OSError("temporary resolver failure")
+
+    with pytest.raises(TargetValidationError, match="could not be resolved"):
+        validate_target_url(
+            "https://fixture.example/mcp",
+            resolver=failing_resolver,
         )

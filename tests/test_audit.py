@@ -791,3 +791,46 @@ def test_parallel_probe_calls_cannot_exceed_first_persisted_budget(tmp_path):
     assert len(persisted.probes) == 1
     assert not any(isinstance(result, Exception) for result in results)
     assert persisted.status == CaseStatus.INCOMPLETE
+
+
+@pytest.mark.anyio
+async def test_call_timeout_is_clamped_by_the_shared_audit_deadline(tmp_path):
+    service = CaseService(
+        JsonCaseStore(tmp_path),
+        public_base_url="https://airlock.example",
+        target_resolver=lambda hostname: ["93.184.216.34"],
+    )
+    executor = AuditExecutor(
+        service,
+        audit_operation_timeout_seconds=60.0,
+        audit_total_timeout_seconds=5.0,
+    )
+    deadline = asyncio.get_running_loop().time() + 5.0
+
+    assert executor._call_timeout(None) == 60.0
+    assert executor._call_timeout(deadline) <= 5.0
+
+
+@pytest.mark.anyio
+async def test_call_timeout_raises_once_the_audit_deadline_has_passed(tmp_path):
+    service = CaseService(
+        JsonCaseStore(tmp_path),
+        public_base_url="https://airlock.example",
+        target_resolver=lambda hostname: ["93.184.216.34"],
+    )
+    executor = AuditExecutor(service, audit_operation_timeout_seconds=60.0)
+    expired = asyncio.get_running_loop().time() - 1.0
+
+    with pytest.raises(asyncio.TimeoutError):
+        executor._call_timeout(expired)
+
+
+def test_audit_total_timeout_must_be_a_positive_number(tmp_path):
+    service = CaseService(
+        JsonCaseStore(tmp_path),
+        public_base_url="https://airlock.example",
+        target_resolver=lambda hostname: ["93.184.216.34"],
+    )
+
+    with pytest.raises(ValueError, match="audit_total_timeout_seconds"):
+        AuditExecutor(service, audit_total_timeout_seconds=0)

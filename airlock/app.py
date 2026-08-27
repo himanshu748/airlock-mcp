@@ -98,6 +98,7 @@ def create_app(
     max_catalog_bytes: int = 2 * 1024 * 1024,
     max_audit_response_bytes: int = 4 * 1024 * 1024,
     audit_operation_timeout_seconds: float = 60.0,
+    audit_total_timeout_seconds: float = 240.0,
     probe_planning_timeout_seconds: float = 5.0,
     probe_planning_memory_bytes: int = 512 * 1024 * 1024,
     max_runtime_events: int = 2_000,
@@ -155,6 +156,7 @@ def create_app(
         max_catalog_bytes=max_catalog_bytes,
         max_audit_response_bytes=max_audit_response_bytes,
         audit_operation_timeout_seconds=audit_operation_timeout_seconds,
+        audit_total_timeout_seconds=audit_total_timeout_seconds,
         probe_planning_timeout_seconds=probe_planning_timeout_seconds,
         probe_planning_memory_bytes=probe_planning_memory_bytes,
     )
