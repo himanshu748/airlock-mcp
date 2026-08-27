@@ -1,6 +1,6 @@
 # Airlock backend
 
-Airlock compares an MCP server's declarations with bounded observations, records the evidence and emits a connector policy enforced by a per-case proxy. This repository contains the backend only. It does not include a website, dashboard or custom interface.
+Airlock compares an MCP server's declarations with bounded observations, records the evidence and emits a connector policy enforced by a per-case proxy. It ships an optional read-only operator interface that puts the declarations and the observations side by side.
 
 > Airlock reports what it observed. Absence of a finding is not proof of safety.
 
@@ -13,6 +13,8 @@ Airlock compares an MCP server's declarations with bounded observations, records
 | Artifact download | `/cases/{case_id}/artifacts/{artifact_name}` | Returns only the report, policy or connector artifact with runtime bearer authentication |
 | Honest fixture | `/fixtures/honest/mcp` | Optional owned six-tool fixture with accurate annotations |
 | Dishonest fixture | `/fixtures/dishonest/mcp` | Optional owned six-tool fixture with five planted, toggleable behaviors |
+| Operator interface | `/ui/` | Landing page and inspection record, on in development, opt in for production |
+| Read API | `/api/cases`, `/api/cases/{case_id}` | Read-only case views for the interface, gated by the same switch |
 
 The control MCP exposes exactly six tools:
 
@@ -85,6 +87,56 @@ Use these submitted targets:
 
 The dishonest fixture enables all five planted behaviors when mounted through the environment entry point: a read-only claim that writes, undeclared egress, canary movement, filesystem scope escape and an instruction embedded in a tool result. The fixture records sensor events directly into the matching `controlled_fixture` case. It does not contact an external sink.
 
+## Operator interface
+
+A Next.js App Router application, exported statically into `airlock/ui/` and
+served by the backend at `/ui/`. It is committed to the repository, so running
+Airlock never requires Node and the demo is a single process.
+
+- `/ui/` states what Airlock does and the gap it closes.
+- `/ui/record/` is the inspection record: what the server declared on the left,
+  verbatim and in the server's own words, and what Airlock observed on the
+  right. Rows align and sort worst first, so divergence is visible before you
+  read a word. A verdict stamp lands on each row, `CLEARED`, `HOLD` or
+  `BLOCKED`, always with a word and a glyph rather than colour alone.
+
+It reads two endpoints: `GET /api/cases` and `GET /api/cases/{case_id}`.
+
+The interface is **on by default in development** and off in production, because
+it carries no authentication of its own. Override either way with
+`AIRLOCK_ENABLE_OPERATOR_UI`. Keep it on a loopback interface.
+
+Three properties are deliberate and covered by tests:
+
+- **Everything on those pages is untrusted.** Tool names, descriptions, schemas
+  and detector explanations all originate with the server under audit. React
+  escapes them, there is no `dangerouslySetInnerHTML` in the project, and the
+  backend sends `default-src 'none'` with `connect-src 'self'` so injected
+  markup would have nowhere to send anything. `script-src` allows
+  `'unsafe-inline'` because a Next.js static export carries its hydration
+  payload inline and cannot use per-response nonces.
+- **The built pages make no external requests.** Fonts are self-hosted by
+  `next/font`, so the interface works with no network and cannot leak a case id
+  through an asset request.
+- **The read API returns text, the control MCP returns digests.**
+  `read_evidence` reduces descriptions and explanations to digests because those
+  values re-enter the model. The read API is for a human, so it returns them
+  verbatim.
+
+### Rebuilding the interface
+
+Only needed when changing `frontend/`. Do not build inside an iCloud-synced
+directory, where npm stalls:
+
+```bash
+cp -R frontend /tmp/airlock-frontend && cd /tmp/airlock-frontend
+npm install
+npm run build
+```
+
+Copy the resulting `out/` over `airlock/ui/` and commit it. See
+`frontend/README.md`.
+
 ## Audit workflow
 
 1. Register the control connector using [`configs/airlock-control-connector.json`](configs/airlock-control-connector.json) and configure its bearer header.
@@ -152,7 +204,8 @@ the credential already in hand.
 - JSON Schema references, `patternProperties` and every `pattern` expression are outside the bounded v1 probe profile. Their cases stop as `incomplete`.
 - The bundled server runs as one process. The JSON case store is not a multi-process coordination layer.
 - On non-Linux hosts, enforce `AIRLOCK_PROBE_PLANNING_MEMORY_BYTES` through the surrounding container or process supervisor because the backend's child address-space limit is Linux-specific.
-- No frontend is included.
+- The operator interface is read-only. Opening cases, sealing them and emitting policy all remain control MCP operations with their own approval gates.
+- The operator interface and its read API have no authentication of their own and must stay on loopback. They are on by default only when `AIRLOCK_INSECURE_DEVELOPMENT` is set.
 
 ## Verify
 
@@ -162,4 +215,4 @@ the credential already in hand.
 python3 /Users/himanshujha/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/airlock-audit
 ```
 
-The test suite covers domain invariants, evidence persistence, schema-driven probes, all detector outcomes, honest and dishonest fixtures, the control MCP, target validation, DNS pinning, modern and legacy MCP proxy routing, streamed responses, enforcement and policy emission.
+The test suite covers domain invariants, evidence persistence, schema-driven probes, all detector outcomes, honest and dishonest fixtures, the control MCP, target validation, DNS pinning, modern and legacy MCP proxy routing, streamed responses, enforcement, policy emission, the read API, and the operator interface's no-markup, no-external-request and language-discipline properties.

@@ -194,6 +194,13 @@ def create_app_from_env(
             "AIRLOCK_MAX_RUNTIME_STREAM_SECONDS",
             default=300,
         ),
+        enable_operator_ui=_boolean(
+            values,
+            "AIRLOCK_ENABLE_OPERATOR_UI",
+            # On in development so the interface is never a silent 404.
+            # Production must opt in, because it carries no auth of its own.
+            default=insecure_development,
+        ),
         mount_owned_fixtures=_boolean(
             values,
             "AIRLOCK_MOUNT_OWNED_FIXTURES",
