@@ -484,11 +484,11 @@ def test_fastapi_assembly_mounts_control_mcp_and_case_proxy(tmp_path):
     async def upstream(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {}})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    upstream_transport = httpx.MockTransport(upstream)
     app = create_app(
         case_root=tmp_path / "cases",
         public_base_url="http://testserver",
-        upstream_client=upstream_client,
+        upstream_transport_factory=lambda binding: upstream_transport,
         control_allowed_hosts=["testserver"],
         target_resolver=lambda hostname: ["93.184.216.34"],
     )
@@ -533,19 +533,16 @@ def test_fastapi_assembly_mounts_control_mcp_and_case_proxy(tmp_path):
         "/airlock-control",
         "/cases/{case_id}/mcp",
     }
-    asyncio.run(upstream_client.aclose())
 
 
 def test_fastapi_assembly_can_require_bearer_auth_for_control_mcp(tmp_path):
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(500, request=request)
-        )
+    upstream_transport = httpx.MockTransport(
+        lambda request: httpx.Response(500, request=request)
     )
     app = create_app(
         case_root=tmp_path / "cases",
         public_base_url="http://testserver",
-        upstream_client=upstream_client,
+        upstream_transport_factory=lambda binding: upstream_transport,
         control_allowed_hosts=["testserver"],
         control_bearer_token="control-secret",
         target_resolver=lambda hostname: ["93.184.216.34"],
@@ -582,19 +579,16 @@ def test_fastapi_assembly_can_require_bearer_auth_for_control_mcp(tmp_path):
     assert denied.status_code == 401
     assert denied.headers["www-authenticate"] == "Bearer"
     assert allowed.status_code == 200
-    asyncio.run(upstream_client.aclose())
 
 
 def test_fastapi_assembly_can_require_separate_case_proxy_auth(tmp_path):
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(500, request=request)
-        )
+    upstream_transport = httpx.MockTransport(
+        lambda request: httpx.Response(500, request=request)
     )
     app = create_app(
         case_root=tmp_path / "cases",
         public_base_url="http://testserver",
-        upstream_client=upstream_client,
+        upstream_transport_factory=lambda binding: upstream_transport,
         control_allowed_hosts=["testserver"],
         case_proxy_bearer_token="runtime-secret",
         target_resolver=lambda hostname: ["93.184.216.34"],
@@ -605,7 +599,6 @@ def test_fastapi_assembly_can_require_separate_case_proxy_auth(tmp_path):
 
     assert denied.status_code == 401
     assert denied.headers["www-authenticate"] == "Bearer"
-    asyncio.run(upstream_client.aclose())
 
 
 def test_global_upstream_headers_require_an_exact_target_url(tmp_path):

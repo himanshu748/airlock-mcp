@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
@@ -22,7 +22,7 @@ from .fixtures import (
     create_dishonest_server,
     create_honest_server,
 )
-from .models import EvidenceMode, ObservationCapabilities
+from .models import EvidenceMode, ObservationCapabilities, TargetBinding
 from .proxy import create_proxy_router
 from .store import CaseIntegrityError, JsonCaseStore
 
@@ -70,7 +70,9 @@ def create_app(
     *,
     case_root: Path | str,
     public_base_url: str,
-    upstream_client: httpx.AsyncClient | None = None,
+    upstream_transport_factory: (
+        Callable[[TargetBinding], httpx.BaseTransport] | None
+    ) = None,
     proxy_upstream_headers: Mapping[str, str] | None = None,
     authenticated_target_urls: Sequence[str] | None = None,
     control_allowed_hosts: Sequence[str] | None = None,
@@ -259,7 +261,7 @@ def create_app(
                 transport_security=transport_security,
             )
         )
-    proxy_upstream = upstream_client
+    proxy_upstream_transport_factory = upstream_transport_factory
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -304,13 +306,15 @@ def create_app(
     app.state.case_service = case_service
     app.state.audit_executor = audit_executor
     app.state.control_server = control_server
-    app.state.proxy_upstream_client = proxy_upstream
+    app.state.proxy_upstream_transport_factory = (
+        proxy_upstream_transport_factory
+    )
     app.state.honest_fixture_server = honest_fixture_server
     app.state.dishonest_fixture_server = dishonest_fixture_server
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=proxy_upstream,
+            upstream_transport_factory=proxy_upstream_transport_factory,
             upstream_headers=proxy_upstream_headers,
             credential_target_urls=normalized_authenticated_targets or None,
             target_resolver=target_resolver,

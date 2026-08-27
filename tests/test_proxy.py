@@ -17,6 +17,7 @@ from airlock.models import (
     ObservationCapabilities,
     EventKind,
     ProbeRecord,
+    TargetBinding,
     ToolDeclaration,
 )
 from airlock.proxy import _filter_sse_chunks, create_proxy_router
@@ -98,12 +99,12 @@ def test_denied_tool_returns_mcp_error_without_reaching_upstream(tmp_path):
         upstream_calls.append(request)
         return httpx.Response(500)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -161,12 +162,12 @@ def test_non_object_json_rpc_request_is_rejected_before_upstream(tmp_path, paylo
         upstream_calls.append(request)
         return httpx.Response(500)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -198,14 +199,12 @@ def test_non_tool_capability_methods_are_denied_before_upstream(
         upstream_calls.append(request)
         return httpx.Response(500)
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -239,12 +238,12 @@ def test_unknown_case_returns_bounded_error(case_id, tmp_path):
         upstream_calls.append(request)
         return httpx.Response(500)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -284,12 +283,12 @@ def test_approved_tool_is_forwarded_once_and_transcript_is_recorded(tmp_path):
             },
         )
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -336,14 +335,12 @@ def test_runtime_transcript_retention_is_bounded(tmp_path):
             },
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
             max_runtime_events=2,
         )
@@ -389,12 +386,12 @@ def test_modern_routing_header_name_mismatch_is_rejected_before_upstream(tmp_pat
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -428,12 +425,12 @@ def test_routing_header_mismatch_cannot_bypass_checks_by_omitting_version(tmp_pa
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -487,12 +484,12 @@ def test_mcp_parameter_routing_headers_must_match_inventoried_schema_and_body(
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -530,12 +527,12 @@ def test_json_rpc_response_message_is_forwarded_without_tool_dispatch(tmp_path):
         upstream_calls.append(request)
         return httpx.Response(202)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -582,12 +579,12 @@ def test_public_gateway_fails_closed_until_case_is_sealed(tmp_path):
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -625,12 +622,12 @@ def test_modern_base64_sentinel_tool_name_is_decoded_before_comparison(tmp_path)
             json={"jsonrpc": "2.0", "id": 11, "result": {"content": []}},
         )
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -664,12 +661,12 @@ def test_malformed_base64_sentinel_header_is_a_header_mismatch_error(tmp_path):
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -718,12 +715,12 @@ def test_new_tool_advertised_after_seal_fails_closed(tmp_path):
             },
         )
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -768,12 +765,12 @@ def test_terminal_page_of_paginated_catalog_is_validated_as_a_page(tmp_path):
             },
         )
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -819,12 +816,12 @@ def test_public_gateway_fails_closed_for_legacy_methods_before_seal(tmp_path, me
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -849,12 +846,12 @@ def test_gateway_credentials_and_cookies_are_not_forwarded_to_target(tmp_path):
             json={"jsonrpc": "2.0", "id": 21, "result": {"content": []}},
         )
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             upstream_headers=target_headers,
             credential_target_urls={"https://fixture.example/mcp"},
             target_resolver=_public_resolver,
@@ -905,12 +902,12 @@ def test_changed_target_auth_context_fails_closed_before_upstream(tmp_path):
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             upstream_headers={"Authorization": "Bearer changed-token"},
             credential_target_urls={"https://fixture.example/mcp"},
             target_resolver=_public_resolver,
@@ -940,12 +937,12 @@ def test_malformed_tool_call_name_is_rejected_before_upstream(tmp_path, invalid_
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -976,12 +973,12 @@ def test_oversized_request_is_rejected_before_upstream(tmp_path):
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
             max_request_bytes=128,
         )
@@ -1006,12 +1003,12 @@ def test_dns_binding_change_fails_closed_before_upstream(tmp_path):
         upstream_calls.append(request)
         return httpx.Response(200)
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=lambda hostname: ["93.184.216.35"],
         )
     )
@@ -1042,12 +1039,12 @@ def test_tools_list_changed_notification_is_removed_and_disables_enforcement(
             stream=EventStream(),
         )
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -1088,14 +1085,12 @@ def test_server_initiated_sampling_request_is_removed_from_sse(tmp_path):
             stream=ServerRequestStream(),
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -1129,14 +1124,12 @@ def test_json_server_initiated_request_is_rejected_and_disables_enforcement(
             },
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -1193,14 +1186,12 @@ def test_tools_list_sse_cannot_smuggle_a_server_initiated_request(tmp_path):
             ),
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -1257,14 +1248,12 @@ def test_matching_tools_list_sse_passes_catalog_validation(tmp_path):
             content=b"event: message\ndata: " + result_message + b"\n\n",
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -1310,14 +1299,12 @@ def test_cr_only_and_mixed_sse_line_endings_are_forwarded(tmp_path):
             stream=MixedLineStream(),
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -1377,14 +1364,12 @@ def test_encoded_runtime_response_is_rejected_before_forwarding(tmp_path):
             content=gzip.compress(b"compressed-suspect-content"),
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -1417,14 +1402,12 @@ def test_buffered_response_total_duration_limit_disables_enforcement(tmp_path):
             stream=SlowJsonStream(),
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
             upstream_read_timeout_seconds=0.1,
             max_stream_duration_seconds=0.01,
@@ -1459,14 +1442,12 @@ def test_oversized_streamed_tool_result_disables_enforcement(tmp_path):
             stream=OversizedEventStream(),
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
             max_buffered_response_bytes=64,
         )
@@ -1512,14 +1493,12 @@ def test_tool_stream_duration_limit_disables_enforcement(tmp_path):
             stream=SlowEventStream(),
         )
 
-    upstream_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
-    )
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
             upstream_read_timeout_seconds=0.1,
             max_stream_duration_seconds=0.01,
@@ -1559,12 +1538,12 @@ def test_oversized_buffered_upstream_response_fails_closed(tmp_path):
             content=b"x" * 129,
         )
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
             max_buffered_response_bytes=128,
         )
@@ -1596,12 +1575,12 @@ def test_upstream_redirect_fails_closed_without_exposing_location(
             headers={"Location": "https://suspect.example/direct-mcp"},
         )
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+    upstream_transport = httpx.MockTransport(upstream_handler)
     app = FastAPI()
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=upstream_client,
+            upstream_transport_factory=lambda binding: upstream_transport,
             target_resolver=_public_resolver,
         )
     )
@@ -1619,3 +1598,190 @@ def test_upstream_redirect_fails_closed_without_exposing_location(
     failed_case = store.load_case(case.case_id)
     assert failed_case.status.value == "incomplete"
     assert failed_case.enforcement_active is False
+
+
+def _sealed_case_for_protocol_test(tmp_path, protocol_version="2026-07-28"):
+    store = JsonCaseStore(tmp_path)
+    case = store.create_case(
+        target_url="https://fixture.example/mcp",
+        declared_scope=DeclaredScope(),
+        observation_capabilities=ObservationCapabilities.controlled_fixture(),
+        target_binding=TargetBinding(
+            scheme="https",
+            hostname="fixture.example",
+            port=443,
+            resolved_ips=["93.184.216.34"],
+        ),
+    )
+    service = CaseService(
+        store,
+        public_base_url="https://airlock.example",
+        target_resolver=_public_resolver,
+    )
+    declarations = [ToolDeclaration(name="search_docs", annotations={"readOnlyHint": True})]
+    service.record_inventory(
+        case.case_id,
+        declarations=declarations,
+        protocol_version=protocol_version,
+        auth_context_fingerprint=fingerprint_auth_context({}),
+    )
+    service.start_probing(case.case_id)
+    store.append_probe(
+        case.case_id,
+        ProbeRecord(probe_id="p1", tool="search_docs", kind="baseline",
+                    accepted=True, completed=True),
+    )
+    checks = detect_findings(
+        declarations=declarations,
+        events=[],
+        probes=store.load_case(case.case_id).probes,
+        canaries={},
+        scope=DeclaredScope(),
+        capabilities=ObservationCapabilities.controlled_fixture(),
+        evidence_mode=EvidenceMode.CONTROLLED_FIXTURE,
+    )
+    service.record_checks(case.case_id, checks=checks)
+    service.seal_case(
+        case.case_id,
+        choice=DecisionChoice.APPROVE_ALL,
+        approved_tools=["search_docs"],
+        approval_required_tools=["search_docs"],
+        decision_source="test",
+    )
+    return store, case.case_id
+
+
+def _protocol_app(store, forwarded):
+    def handler(request: httpx.Request) -> httpx.Response:
+        forwarded.append(request)
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {}})
+
+    transport = httpx.MockTransport(handler)
+    app = FastAPI()
+    app.include_router(
+        create_proxy_router(
+            store,
+            upstream_transport_factory=lambda binding: transport,
+            target_resolver=_public_resolver,
+        )
+    )
+    return app
+
+
+def test_a_runtime_protocol_version_other_than_the_audited_one_is_refused(tmp_path):
+    store, case_id = _sealed_case_for_protocol_test(tmp_path)
+    forwarded = []
+    with TestClient(_protocol_app(store, forwarded)) as client:
+        response = client.post(
+            f"/cases/{case_id}/mcp",
+            headers={"mcp-protocol-version": "2025-03-26"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "search_docs", "arguments": {}},
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == -32021
+    assert forwarded == []
+
+
+def test_the_audited_protocol_version_is_forwarded(tmp_path):
+    store, case_id = _sealed_case_for_protocol_test(tmp_path)
+    forwarded = []
+    with TestClient(_protocol_app(store, forwarded)) as client:
+        response = client.post(
+            f"/cases/{case_id}/mcp",
+            headers={
+                "mcp-protocol-version": "2026-07-28",
+                "mcp-method": "tools/call",
+                "mcp-name": "search_docs",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "search_docs", "arguments": {}},
+            },
+        )
+
+    assert response.status_code == 200
+    assert len(forwarded) == 1
+
+
+def test_initialize_cannot_negotiate_away_from_the_audited_version(tmp_path):
+    store, case_id = _sealed_case_for_protocol_test(tmp_path)
+    forwarded = []
+    with TestClient(_protocol_app(store, forwarded)) as client:
+        response = client.post(
+            f"/cases/{case_id}/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": "2025-03-26"},
+            },
+        )
+
+    assert response.status_code == 409
+    assert forwarded == []
+
+
+def test_the_pinned_transport_cannot_be_replaced_by_an_injected_client(tmp_path):
+    # Injection replaces the transport, which is built per request from the
+    # binding this case validated. There is no parameter that substitutes the
+    # whole client and so skips DNS pinning.
+    import inspect
+
+    from airlock import proxy as proxy_module
+
+    signature = inspect.signature(create_proxy_router)
+    assert "upstream_client" not in signature.parameters
+    assert "upstream_transport_factory" in signature.parameters
+
+    source = inspect.getsource(proxy_module)
+    assert "transport=build_upstream_transport(binding)" in source
+
+
+def test_the_transport_factory_receives_the_validated_binding(tmp_path):
+    store, case_id = _sealed_case_for_protocol_test(tmp_path)
+    seen_bindings = []
+
+    def factory(binding):
+        seen_bindings.append(binding)
+        return httpx.MockTransport(
+            lambda request: httpx.Response(
+                200, json={"jsonrpc": "2.0", "id": 1, "result": {}}
+            )
+        )
+
+    app = FastAPI()
+    app.include_router(
+        create_proxy_router(
+            store,
+            upstream_transport_factory=factory,
+            target_resolver=_public_resolver,
+        )
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            f"/cases/{case_id}/mcp",
+            headers={
+                "mcp-protocol-version": "2026-07-28",
+                "mcp-method": "tools/call",
+                "mcp-name": "search_docs",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "search_docs", "arguments": {}},
+            },
+        )
+
+    assert response.status_code == 200
+    assert len(seen_bindings) == 1
+    assert seen_bindings[0].hostname == "fixture.example"
+    assert seen_bindings[0].resolved_ips == ["93.184.216.34"]

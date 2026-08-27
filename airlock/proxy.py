@@ -20,7 +20,13 @@ from mcp.shared.inbound import (
 )
 
 from .auth_context import fingerprint_auth_context
-from .models import CaseStatus, EvidenceEvent, EventKind, ToolDeclaration
+from .models import (
+    CaseStatus,
+    EvidenceEvent,
+    EventKind,
+    TargetBinding,
+    ToolDeclaration,
+)
 from .pinned_transport import create_pinned_httpx_transport
 from .store import CaseIntegrityError, JsonCaseStore
 from .target_policy import TargetValidationError, validate_target_url
@@ -156,7 +162,9 @@ def _forward_response_headers(response: httpx.Response) -> dict[str, str]:
 def create_proxy_router(
     store: JsonCaseStore,
     *,
-    upstream_client: httpx.AsyncClient | None = None,
+    upstream_transport_factory: (
+        Callable[[TargetBinding], httpx.BaseTransport] | None
+    ) = None,
     upstream_headers: Mapping[str, str] | None = None,
     credential_target_urls: Iterable[str] | None = None,
     target_resolver: Callable[[str], Iterable[str]] = _system_resolver,
@@ -180,6 +188,9 @@ def create_proxy_router(
     }.items():
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
             raise ValueError(f"{name} must be a positive number")
+    build_upstream_transport = (
+        upstream_transport_factory or create_pinned_httpx_transport
+    )
     configured_upstream_headers = dict(upstream_headers or {})
     configured_credential_targets = frozenset(credential_target_urls or [])
     if configured_upstream_headers and not configured_credential_targets:
@@ -366,6 +377,42 @@ def create_proxy_router(
                         },
                     },
                     status_code=400,
+                )
+            # The catalog, schemas and annotations in this case were
+            # inventoried under one protocol version. Forwarding an approved
+            # call under a different one would enforce a policy derived from a
+            # surface that was never audited.
+            supplied_protocol = request.headers.get("mcp-protocol-version")
+            if supplied_protocol is None and payload.get("method") == "initialize":
+                initialize_params = payload.get("params")
+                if isinstance(initialize_params, dict):
+                    negotiated = initialize_params.get("protocolVersion")
+                    if isinstance(negotiated, str):
+                        supplied_protocol = negotiated
+            if (
+                supplied_protocol is not None
+                and case.protocol_version is not None
+                and supplied_protocol != case.protocol_version
+            ):
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload.get("id"),
+                        "error": {
+                            "code": -32021,
+                            "message": (
+                                "MCP protocol version does not match the "
+                                "version this case was audited under"
+                            ),
+                            "data": {
+                                "case_id": case_id,
+                                "audited_protocol_version": (
+                                    case.protocol_version
+                                ),
+                            },
+                        },
+                    },
+                    status_code=409,
                 )
             routing_headers_present = any(
                 request.headers.get(name) is not None
@@ -618,9 +665,13 @@ def create_proxy_router(
                 max_runtime_events=max_runtime_events,
             )
 
-        owns_request_client = upstream_client is None
-        request_client = upstream_client or httpx.AsyncClient(
-            transport=create_pinned_httpx_transport(binding),
+        # The transport is built per request from the binding this case
+        # validated. Injection replaces the transport, never the client, so a
+        # caller cannot substitute one that skips DNS pinning and reaches an
+        # address outside the validated binding.
+        owns_request_client = True
+        request_client = httpx.AsyncClient(
+            transport=build_upstream_transport(binding),
             follow_redirects=False,
             trust_env=False,
             timeout=httpx.Timeout(

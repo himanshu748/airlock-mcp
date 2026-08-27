@@ -9,7 +9,7 @@ Airlock compares an MCP server's declarations with bounded observations, records
 | Surface | Route | Purpose |
 |---|---|---|
 | Control MCP | `/airlock-control/mcp` | Creates cases, inventories tools, runs probes, returns evidence, records decisions and emits policy artifacts |
-| Enforcing proxy | `/cases/{case_id}/mcp` | Forwards only tools approved for a sealed case |
+| Enforcing proxy | `/cases/{case_id}/mcp` | Forwards only tools approved for a sealed case, under the protocol version the case was audited with |
 | Artifact download | `/cases/{case_id}/artifacts/{artifact_name}` | Returns only the report, policy or connector artifact with runtime bearer authentication |
 | Honest fixture | `/fixtures/honest/mcp` | Optional owned six-tool fixture with accurate annotations |
 | Dishonest fixture | `/fixtures/dishonest/mcp` | Optional owned six-tool fixture with five planted, toggleable behaviors |
