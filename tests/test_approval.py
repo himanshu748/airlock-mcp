@@ -57,3 +57,28 @@ def test_an_unapproved_tool_is_never_added_to_the_approval_gate():
     case = _case([_check(FindingStatus.SENSOR_FAILED, "mcp_transcript")])
 
     assert minimum_approval_tools(case, []) == set()
+
+
+def test_canary_exfiltration_is_observable_from_tool_results_alone():
+    # The transcript sensor scans tool results for planted values, so a
+    # transcript-only case must not report the check as unobservable.
+    from airlock.detectors import _check_capability_available
+    from airlock.models import ObservationCapabilities
+
+    transcript_only = ObservationCapabilities(
+        mcp_traffic=True,
+        tool_results=True,
+        server_egress=False,
+        server_filesystem=False,
+    )
+    blind = ObservationCapabilities(
+        mcp_traffic=True,
+        tool_results=False,
+        server_egress=False,
+        server_filesystem=False,
+    )
+
+    assert _check_capability_available(
+        CheckName.CANARY_EXFILTRATION, transcript_only
+    )
+    assert not _check_capability_available(CheckName.CANARY_EXFILTRATION, blind)

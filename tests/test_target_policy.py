@@ -242,3 +242,20 @@ def test_transient_resolver_oserror_becomes_a_target_validation_error():
             "https://fixture.example/mcp",
             resolver=failing_resolver,
         )
+
+
+def test_resolver_returning_a_non_iterable_becomes_a_target_validation_error():
+    with pytest.raises(TargetValidationError, match="invalid result"):
+        validate_target_url("https://x.example/mcp", resolver=lambda hostname: None)
+
+
+def test_resolver_raising_type_or_value_error_stays_normalized():
+    def raises_type_error(hostname):
+        raise TypeError("bad resolver")
+
+    def raises_value_error(hostname):
+        raise ValueError("bad resolver")
+
+    for resolver in (raises_type_error, raises_value_error):
+        with pytest.raises(TargetValidationError, match="invalid result"):
+            validate_target_url("https://x.example/mcp", resolver=resolver)

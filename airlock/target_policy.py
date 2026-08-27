@@ -88,9 +88,12 @@ def validate_target_url(
     try:
         resolved = tuple(resolver(hostname))
     except OSError as exc:
+        # NXDOMAIN and transient resolver failures arrive as socket.gaierror.
         raise TargetValidationError(
             "target hostname could not be resolved"
         ) from exc
+    except (TypeError, ValueError) as exc:
+        raise TargetValidationError("resolver returned an invalid result") from exc
     try:
         addresses = tuple(ip_address(value) for value in resolved)
     except (TypeError, ValueError) as exc:
