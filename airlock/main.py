@@ -50,6 +50,36 @@ def _positive_integer(
     return value
 
 
+def _require_loopback_operator_ui(environ: Mapping[str, str], host: str) -> None:
+    """The operator interface has no authentication, so refuse to expose it.
+
+    Documenting a loopback boundary is not the same as holding one. Binding a
+    non-loopback host with the interface enabled would let any reachable client
+    enumerate and read case records, so this fails closed at startup.
+    """
+    insecure_development = _boolean(environ, "AIRLOCK_INSECURE_DEVELOPMENT")
+    if not _boolean(
+        environ,
+        "AIRLOCK_ENABLE_OPERATOR_UI",
+        default=insecure_development,
+    ):
+        return
+    try:
+        address = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        if host.lower() in {"localhost", ""}:
+            return
+        raise ValueError(
+            "AIRLOCK_ENABLE_OPERATOR_UI requires a loopback AIRLOCK_HOST; "
+            f"{host!r} is not a loopback address"
+        )
+    if not address.is_loopback:
+        raise ValueError(
+            "AIRLOCK_ENABLE_OPERATOR_UI requires a loopback AIRLOCK_HOST; "
+            f"{host!r} is not a loopback address"
+        )
+
+
 def create_app_from_env(
     environ: Mapping[str, str] | None = None,
 ) -> FastAPI:
@@ -99,6 +129,9 @@ def create_app_from_env(
             "AIRLOCK_STATE_INTEGRITY_KEY is required unless "
             "AIRLOCK_INSECURE_DEVELOPMENT is enabled"
         )
+    # Also enforced per request in the app, because a caller can build the
+    # application directly without going through run().
+    _require_loopback_operator_ui(values, host)
     upstream_headers = (
         {"Authorization": target_authorization}
         if target_authorization is not None
@@ -207,36 +240,6 @@ def create_app_from_env(
         ),
         fixture_root=Path(fixture_root) if fixture_root else None,
     )
-
-
-def _require_loopback_operator_ui(environ: Mapping[str, str], host: str) -> None:
-    """The operator interface has no authentication, so refuse to expose it.
-
-    Documenting a loopback boundary is not the same as holding one. Binding a
-    non-loopback host with the interface enabled would let any reachable client
-    enumerate and read case records, so this fails closed at startup.
-    """
-    insecure_development = _boolean(environ, "AIRLOCK_INSECURE_DEVELOPMENT")
-    if not _boolean(
-        environ,
-        "AIRLOCK_ENABLE_OPERATOR_UI",
-        default=insecure_development,
-    ):
-        return
-    try:
-        address = ipaddress.ip_address(host.strip("[]"))
-    except ValueError:
-        if host.lower() in {"localhost", ""}:
-            return
-        raise ValueError(
-            "AIRLOCK_ENABLE_OPERATOR_UI requires a loopback AIRLOCK_HOST; "
-            f"{host!r} is not a loopback address"
-        )
-    if not address.is_loopback:
-        raise ValueError(
-            "AIRLOCK_ENABLE_OPERATOR_UI requires a loopback AIRLOCK_HOST; "
-            f"{host!r} is not a loopback address"
-        )
 
 
 def run() -> None:

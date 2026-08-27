@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
+from ipaddress import ip_address
 from pathlib import Path
 
 import httpx
@@ -97,8 +98,25 @@ _UI_SECURITY_HEADERS = (
 )
 
 
+def _is_loopback_client(scope: Scope) -> bool:
+    client = scope.get("client")
+    if not client:
+        # No peer address available. Fail closed rather than guess.
+        return False
+    try:
+        return ip_address(str(client[0]).strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
 class _OperatorUiSecurityMiddleware:
-    """Attach the interface's security headers to every /ui and /api response."""
+    """Hold the interface's loopback boundary and attach its security headers.
+
+    The read API has no authentication, so the boundary has to be enforced on
+    the request itself. Checking only the configured bind host would be
+    bypassed by any caller that builds the application directly rather than
+    going through run().
+    """
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -110,6 +128,18 @@ class _OperatorUiSecurityMiddleware:
         )
         if not guarded:
             await self.app(scope, receive, send)
+            return
+
+        if not _is_loopback_client(scope):
+            response = Response(
+                "The Airlock operator interface is reachable only from loopback",
+                status_code=403,
+                headers={
+                    name.decode("ascii"): value.decode("ascii")
+                    for name, value in _UI_SECURITY_HEADERS
+                },
+            )
+            await response(scope, receive, send)
             return
 
         async def send_with_headers(message: dict) -> None:

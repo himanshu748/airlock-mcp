@@ -104,7 +104,14 @@ It reads two endpoints: `GET /api/cases` and `GET /api/cases/{case_id}`.
 
 The interface is **on by default in development** and off in production, because
 it carries no authentication of its own. Override either way with
-`AIRLOCK_ENABLE_OPERATOR_UI`. Keep it on a loopback interface.
+`AIRLOCK_ENABLE_OPERATOR_UI`.
+
+The loopback boundary is enforced, not merely documented. `/ui` and `/api`
+reject any request whose peer is not a loopback address, which holds however
+the application was started, including building it straight from the factory.
+Startup additionally refuses a non-loopback `AIRLOCK_HOST` while the interface
+is enabled, so the misconfiguration fails immediately rather than at the first
+request.
 
 Three properties are deliberate and covered by tests:
 
@@ -118,6 +125,10 @@ Three properties are deliberate and covered by tests:
 - **The built pages make no external requests.** Fonts are self-hosted by
   `next/font`, so the interface works with no network and cannot leak a case id
   through an asset request.
+- **The pinned transport cannot be replaced.** The proxy accepts a transport
+  factory, never a prebuilt client, and builds the transport per request from
+  the binding the case validated. There is no parameter that swaps out the
+  whole client and so skips DNS pinning.
 - **The read API returns text, the control MCP returns digests.**
   `read_evidence` reduces descriptions and explanations to digests because those
   values re-enter the model. The read API is for a human, so it returns them
@@ -205,7 +216,7 @@ the credential already in hand.
 - The bundled server runs as one process. The JSON case store is not a multi-process coordination layer.
 - On non-Linux hosts, enforce `AIRLOCK_PROBE_PLANNING_MEMORY_BYTES` through the surrounding container or process supervisor because the backend's child address-space limit is Linux-specific.
 - The operator interface is read-only. Opening cases, sealing them and emitting policy all remain control MCP operations with their own approval gates.
-- The operator interface and its read API have no authentication of their own and must stay on loopback. They are on by default only when `AIRLOCK_INSECURE_DEVELOPMENT` is set.
+- The operator interface and its read API have no authentication of their own. They are restricted to loopback peers, enforced per request, and are on by default only when `AIRLOCK_INSECURE_DEVELOPMENT` is set. Loopback is a network boundary, not user authentication: anyone with local access to the host can read case records.
 
 ## Verify
 

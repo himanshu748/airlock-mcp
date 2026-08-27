@@ -187,7 +187,9 @@ def test_operator_ui_serves_the_inspection_page_when_enabled(tmp_path):
             "AIRLOCK_INSECURE_DEVELOPMENT": "true",
         }
     )
-    client = TestClient(app)
+    # The interface holds a loopback boundary on the request itself, so the
+    # test client has to look like a loopback peer.
+    client = TestClient(app, client=("127.0.0.1", 40000))
 
     assert "/api/cases" in {route.path for route in app.routes}
     assert client.get("/api/cases").json() == {"cases": []}
@@ -227,3 +229,33 @@ def test_a_non_loopback_host_is_fine_when_the_interface_is_off():
 
     _require_loopback_operator_ui({"AIRLOCK_ENABLE_OPERATOR_UI": "false"}, "0.0.0.0")
     _require_loopback_operator_ui({}, "0.0.0.0")
+
+
+def test_the_operator_interface_refuses_a_non_loopback_peer(tmp_path):
+    # This is the boundary that matters: it holds no matter how the
+    # application was built, including straight from the factory.
+    app = create_app_from_env(
+        {
+            "AIRLOCK_CASE_ROOT": str(tmp_path / "peer"),
+            "AIRLOCK_INSECURE_DEVELOPMENT": "true",
+        }
+    )
+    remote = TestClient(app, client=("203.0.113.9", 40000))
+
+    assert remote.get("/api/cases").status_code == 403
+    assert remote.get("/ui/").status_code == 403
+
+    loopback = TestClient(app, client=("127.0.0.1", 40000))
+    assert loopback.get("/api/cases").status_code == 200
+
+
+def test_a_peer_without_a_resolvable_address_is_refused(tmp_path):
+    app = create_app_from_env(
+        {
+            "AIRLOCK_CASE_ROOT": str(tmp_path / "nopeer"),
+            "AIRLOCK_INSECURE_DEVELOPMENT": "true",
+        }
+    )
+
+    # Starlette's default test peer is the non-address string "testclient".
+    assert TestClient(app).get("/api/cases").status_code == 403
