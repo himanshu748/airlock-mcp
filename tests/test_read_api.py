@@ -1,3 +1,4 @@
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -201,3 +202,28 @@ def test_operator_ui_serves_the_inspection_page_when_enabled(tmp_path):
     assert record.status_code == 200
     assert "Airlock inspection record" in record.text
     assert record.headers["content-security-policy"].startswith("default-src 'none'")
+
+
+def test_operator_ui_refuses_to_bind_a_non_loopback_host():
+    # Documenting a loopback boundary is not the same as holding one.
+    from airlock.main import _require_loopback_operator_ui
+
+    for host in ("0.0.0.0", "10.0.0.5", "example.com", "::"):
+        with pytest.raises(ValueError, match="loopback"):
+            _require_loopback_operator_ui(
+                {"AIRLOCK_ENABLE_OPERATOR_UI": "true"}, host
+            )
+
+
+def test_operator_ui_allows_every_loopback_form():
+    from airlock.main import _require_loopback_operator_ui
+
+    for host in ("127.0.0.1", "localhost", "::1", "127.0.0.5"):
+        _require_loopback_operator_ui({"AIRLOCK_ENABLE_OPERATOR_UI": "true"}, host)
+
+
+def test_a_non_loopback_host_is_fine_when_the_interface_is_off():
+    from airlock.main import _require_loopback_operator_ui
+
+    _require_loopback_operator_ui({"AIRLOCK_ENABLE_OPERATOR_UI": "false"}, "0.0.0.0")
+    _require_loopback_operator_ui({}, "0.0.0.0")

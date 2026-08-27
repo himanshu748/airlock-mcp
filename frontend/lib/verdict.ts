@@ -29,17 +29,26 @@ export function toneOf(check: Check): Tone {
   return "hold";
 }
 
+/**
+ * A tool with no recorded checks has not been audited. Falling through to
+ * CLEARED would stamp an affirmative verdict on a case that is still
+ * inventoried or probing, which is exactly the overclaiming the report
+ * language forbids. CLEARED requires a complete matrix that a sensor filled in.
+ */
 export function verdictOf(checks: Check[]): StampVerdict {
+  if (checks.length === 0) return "NOT AUDITED";
   const tones = checks.map(toneOf);
   if (tones.includes("finding")) return "BLOCKED";
   if (tones.includes("hold")) return "HOLD";
+  if (tones.every((tone) => tone === "none")) return "NOT AUDITED";
   return "CLEARED";
 }
 
 export const VERDICT_RANK: Record<StampVerdict, number> = {
   BLOCKED: 0,
   HOLD: 1,
-  CLEARED: 2,
+  "NOT AUDITED": 2,
+  CLEARED: 3,
 };
 
 export const TONE_GLYPH: Record<Tone, string> = {
@@ -52,6 +61,7 @@ export const TONE_GLYPH: Record<Tone, string> = {
 export function stampGlyph(verdict: StampVerdict): string {
   if (verdict === "BLOCKED") return "✕";
   if (verdict === "HOLD") return "▲";
+  if (verdict === "NOT AUDITED") return "?";
   return "✓";
 }
 

@@ -17,14 +17,20 @@ export function RecordView() {
   const [state, setState] = useState<LoadState>("loading");
   const [message, setMessage] = useState("");
   const stampedOnce = useRef<Set<string>>(new Set());
+  // Overlapping selections must not let a slower earlier response overwrite a
+  // newer one, or clear a loaded case with a stale failure.
+  const latestRequest = useRef(0);
 
   const select = useCallback(async (caseId: string) => {
+    const token = ++latestRequest.current;
     try {
       const next = await readCase(caseId);
+      if (token !== latestRequest.current) return;
       setDetail(next);
       setState("ready");
       window.history.replaceState(null, "", `#${caseId}`);
     } catch (error) {
+      if (token !== latestRequest.current) return;
       setDetail(null);
       setState("error");
       setMessage(error instanceof Error ? error.message : String(error));
@@ -145,7 +151,12 @@ function Sheet({ detail, animate }: { detail: CaseDetail; animate: boolean }) {
     return rank !== 0 ? rank : a.name.localeCompare(b.name);
   });
 
-  const tally = { BLOCKED: 0, HOLD: 0, CLEARED: 0 };
+  const tally: Record<string, number> = {
+    BLOCKED: 0,
+    HOLD: 0,
+    "NOT AUDITED": 0,
+    CLEARED: 0,
+  };
   for (const tool of tools) tally[verdictOf(byTool.get(tool.name) ?? [])] += 1;
 
   const capabilities = detail.observation_capabilities ?? {};
@@ -178,7 +189,7 @@ function Sheet({ detail, animate }: { detail: CaseDetail; animate: boolean }) {
         </dl>
 
         <div className="mt-6 flex flex-wrap items-center gap-4">
-          {(["BLOCKED", "HOLD", "CLEARED"] as const)
+          {(["BLOCKED", "HOLD", "NOT AUDITED", "CLEARED"] as const)
             .filter((verdict) => tally[verdict] > 0)
             .map((verdict) => (
               <span key={verdict} className="flex items-center gap-2">

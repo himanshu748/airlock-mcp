@@ -69,5 +69,5 @@ export type CaseDetail = CaseSummary & {
   } | null;
 };
 
-export type StampVerdict = "CLEARED" | "HOLD" | "BLOCKED";
+export type StampVerdict = "CLEARED" | "HOLD" | "BLOCKED" | "NOT AUDITED";
 export type Tone = "finding" | "hold" | "clear" | "none";

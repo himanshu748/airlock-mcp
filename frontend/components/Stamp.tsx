@@ -4,6 +4,7 @@ import { stampGlyph } from "@/lib/verdict";
 const TONE: Record<StampVerdict, { color: string; tilt: string }> = {
   BLOCKED: { color: "text-stamp", tilt: "-3.5deg" },
   HOLD: { color: "text-hold", tilt: "2deg" },
+  "NOT AUDITED": { color: "text-pencil", tilt: "-1.5deg" },
   CLEARED: { color: "text-cleared", tilt: "-2.5deg" },
 };
 

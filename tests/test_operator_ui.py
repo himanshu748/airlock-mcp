@@ -101,3 +101,23 @@ def test_the_export_is_pinned_to_the_route_the_backend_mounts():
     assert 'output: "export"' in config
     assert 'basePath: "/ui"' in config
     assert "trailingSlash: true" in config
+
+
+def test_an_unaudited_tool_is_never_stamped_cleared():
+    # A case can hold declared tools while still inventoried or probing, with
+    # no checks recorded. Stamping those CLEARED would assert a result that
+    # does not exist.
+    verdict = (FRONTEND / "lib" / "verdict.ts").read_text(encoding="utf-8")
+    code = _code_without_comments(verdict)
+
+    assert 'if (checks.length === 0) return "NOT AUDITED";' in code
+    assert '"NOT AUDITED"' in (FRONTEND / "lib" / "types.ts").read_text(encoding="utf-8")
+
+
+def test_case_selection_guards_against_a_stale_response():
+    view = _code_without_comments(
+        (FRONTEND / "app" / "record" / "RecordView.tsx").read_text(encoding="utf-8")
+    )
+
+    assert "latestRequest" in view
+    assert "token !== latestRequest.current" in view

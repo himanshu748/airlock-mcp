@@ -209,11 +209,42 @@ def create_app_from_env(
     )
 
 
+def _require_loopback_operator_ui(environ: Mapping[str, str], host: str) -> None:
+    """The operator interface has no authentication, so refuse to expose it.
+
+    Documenting a loopback boundary is not the same as holding one. Binding a
+    non-loopback host with the interface enabled would let any reachable client
+    enumerate and read case records, so this fails closed at startup.
+    """
+    insecure_development = _boolean(environ, "AIRLOCK_INSECURE_DEVELOPMENT")
+    if not _boolean(
+        environ,
+        "AIRLOCK_ENABLE_OPERATOR_UI",
+        default=insecure_development,
+    ):
+        return
+    try:
+        address = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        if host.lower() in {"localhost", ""}:
+            return
+        raise ValueError(
+            "AIRLOCK_ENABLE_OPERATOR_UI requires a loopback AIRLOCK_HOST; "
+            f"{host!r} is not a loopback address"
+        )
+    if not address.is_loopback:
+        raise ValueError(
+            "AIRLOCK_ENABLE_OPERATOR_UI requires a loopback AIRLOCK_HOST; "
+            f"{host!r} is not a loopback address"
+        )
+
+
 def run() -> None:
     import uvicorn
 
     host = os.environ.get("AIRLOCK_HOST", "127.0.0.1")
     port = _positive_integer(os.environ, "AIRLOCK_PORT", default=8000)
+    _require_loopback_operator_ui(os.environ, host)
     uvicorn.run(create_app_from_env(), host=host, port=port)
 
 
