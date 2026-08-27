@@ -224,3 +224,82 @@ def test_fixture_canary_files_are_private(tmp_path):
     canary_path = tmp_path / "documents" / ".airlock-canary-document_secret.txt"
     assert canary_path.stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "documents").stat().st_mode & 0o777 == 0o700
+
+
+def _controlled_fixture_server(tmp_path, **kwargs):
+    store = JsonCaseStore(tmp_path / "cases")
+    server = create_honest_server(
+        observer=StoreFixtureObserver(
+            store,
+            signing_key="fixture-signing-key",
+            allowed_target_urls={"https://fixture.example/mcp"},
+        ),
+        workspace=tmp_path / "fixture",
+        **kwargs,
+    )
+    return store, server
+
+
+def test_a_runtime_call_without_probe_metadata_is_served(tmp_path):
+    # A post-approval call arriving through the enforcing proxy carries none of
+    # Airlock's probe metadata, because it is not a probe. Refusing it made the
+    # bundled fixtures impossible to use for a real task after approval.
+    store, server = _controlled_fixture_server(tmp_path)
+
+    async def exercise():
+        async with Client(server, mode="auto") as client:
+            return await client.call_tool("search_docs", {"query": "invoice"})
+
+    result = asyncio.run(exercise())
+
+    assert result.is_error is False
+
+
+def test_a_runtime_call_contributes_no_audit_evidence(tmp_path):
+    # It is served, but it is not a probe, so nothing may enter the evidence
+    # store under it.
+    store, server = _controlled_fixture_server(tmp_path)
+    case = store.create_case(
+        target_url="https://fixture.example/mcp",
+        declared_scope=DeclaredScope(),
+        observation_capabilities=ObservationCapabilities.controlled_fixture(),
+        evidence_mode=EvidenceMode.CONTROLLED_FIXTURE,
+    )
+
+    async def exercise():
+        async with Client(server, mode="auto") as client:
+            return await client.call_tool("search_docs", {"query": "invoice"})
+
+    assert asyncio.run(exercise()).is_error is False
+    assert store.load_case(case.case_id).events == []
+
+
+def test_partial_probe_metadata_is_still_refused(tmp_path):
+    # Only the total absence of metadata means "runtime call". Anything partial
+    # must not be able to downgrade itself out of signature verification.
+    store, server = _controlled_fixture_server(tmp_path)
+    case = store.create_case(
+        target_url="https://fixture.example/mcp",
+        declared_scope=DeclaredScope(),
+        observation_capabilities=ObservationCapabilities.controlled_fixture(),
+        evidence_mode=EvidenceMode.CONTROLLED_FIXTURE,
+    )
+
+    async def exercise(meta):
+        async with Client(server, mode="auto") as client:
+            return await client.call_tool("search_docs", {"query": "x"}, meta=meta)
+
+    unsigned = asyncio.run(
+        exercise(
+            {
+                "io.airlock/caseId": case.case_id,
+                "io.airlock/probeId": "probe_attacker",
+            }
+        )
+    )
+    assert unsigned.is_error is True
+
+    case_only = asyncio.run(exercise({"io.airlock/caseId": case.case_id}))
+    assert case_only.is_error is True
+
+    assert store.load_case(case.case_id).events == []
