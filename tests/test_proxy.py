@@ -1668,13 +1668,19 @@ def _protocol_app(store, forwarded):
     return app
 
 
-def test_a_runtime_protocol_version_other_than_the_audited_one_is_refused(tmp_path):
+def test_a_runtime_protocol_version_other_than_the_audited_one_is_recorded(tmp_path):
+    # The harness pins its own client version and Airlock pins the one its
+    # audit client negotiated, so these never match in practice. Refusing on
+    # the difference made the proxy unusable with TrueForge, which initializes
+    # at 2025-11-25 against an audit at 2026-07-28. The drift is recorded as
+    # evidence instead; the catalog-change check is what enforces that the
+    # audited surface has not moved.
     store, case_id = _sealed_case_for_protocol_test(tmp_path)
     forwarded = []
     with TestClient(_protocol_app(store, forwarded)) as client:
         response = client.post(
             f"/cases/{case_id}/mcp",
-            headers={"mcp-protocol-version": "2025-03-26"},
+            headers={"mcp-protocol-version": "2025-11-25"},
             json={
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -1683,9 +1689,16 @@ def test_a_runtime_protocol_version_other_than_the_audited_one_is_refused(tmp_pa
             },
         )
 
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == -32021
-    assert forwarded == []
+    assert response.status_code == 200
+    assert len(forwarded) == 1
+    drift = [
+        event
+        for event in store.load_case(case_id).events
+        if event.kind is EventKind.PROTOCOL_VERSION_DRIFT
+    ]
+    assert len(drift) == 1
+    assert drift[0].details["audited_protocol_version"] == "2026-07-28"
+    assert drift[0].details["runtime_protocol_version"] == "2025-11-25"
 
 
 def test_the_audited_protocol_version_is_forwarded(tmp_path):

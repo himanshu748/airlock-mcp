@@ -382,39 +382,18 @@ def create_proxy_router(
                     },
                     status_code=400,
                 )
-            # The catalog, schemas and annotations in this case were
-            # inventoried under one protocol version. Forwarding an approved
-            # call under a different one would enforce a policy derived from a
-            # surface that was never audited.
-            # Only the header is compared. An initialize body carries the
-            # version the client is requesting, not the one it settles on, so
-            # refusing on that would break every real handshake.
+            # The runtime client's protocol version will not equal the one
+            # Airlock audited under: the harness pins its own client version
+            # and Airlock pins the version its audit client negotiated. The
+            # observed pair here is TrueForge at 2025-11-25 against an audit at
+            # 2026-07-28. Refusing on that difference makes the proxy unusable
+            # with the harness it exists to serve, and it is not the control
+            # that matters. The catalog-change check below compares the live
+            # advertised surface, names, descriptions, schemas and annotations,
+            # against the inventoried one and refuses on any deviation, which
+            # is what catches a surface that differs under another version.
+            # The mismatch is recorded as evidence so a human sees it.
             supplied_protocol = request.headers.get("mcp-protocol-version")
-            if (
-                supplied_protocol is not None
-                and case.protocol_version is not None
-                and supplied_protocol != case.protocol_version
-            ):
-                return JSONResponse(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": payload.get("id"),
-                        "error": {
-                            "code": -32021,
-                            "message": (
-                                "MCP protocol version does not match the "
-                                "version this case was audited under"
-                            ),
-                            "data": {
-                                "case_id": case_id,
-                                "audited_protocol_version": (
-                                    case.protocol_version
-                                ),
-                            },
-                        },
-                    },
-                    status_code=409,
-                )
             routing_headers_present = any(
                 request.headers.get(name) is not None
                 for name in ("mcp-method", "mcp-name")
@@ -649,6 +628,26 @@ def create_proxy_router(
                 default=str,
             ).encode("utf-8")
             runtime_probe_id = f"runtime_{uuid4().hex}"
+            if (
+                supplied_protocol is not None
+                and case.protocol_version is not None
+                and supplied_protocol != case.protocol_version
+            ):
+                store.append_runtime_event(
+                    case_id,
+                    EvidenceEvent(
+                        event_id=f"ev_{uuid4().hex}",
+                        probe_id=runtime_probe_id,
+                        tool=tool_name,
+                        kind=EventKind.PROTOCOL_VERSION_DRIFT,
+                        sensor="mcp_transcript",
+                        details={
+                            "audited_protocol_version": case.protocol_version,
+                            "runtime_protocol_version": supplied_protocol,
+                        },
+                    ),
+                    max_runtime_events=max_runtime_events,
+                )
             store.append_runtime_event(
                 case_id,
                 EvidenceEvent(

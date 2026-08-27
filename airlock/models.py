@@ -45,6 +45,7 @@ class EventKind(str, Enum):
     STATE_CHANGE = "state_change"
     SENSOR_FAILURE = "sensor_failure"
     SENSOR_HEARTBEAT = "sensor_heartbeat"
+    PROTOCOL_VERSION_DRIFT = "protocol_version_drift"
 
 
 class CheckName(str, Enum):
