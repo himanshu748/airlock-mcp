@@ -57,6 +57,90 @@
 }
 
 @layer utilities {
+  /* Marketing surface: a soft lift off the slate, not a glowing box. */
+  .card {
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-desk) 92%, white 8%) 0%,
+      var(--color-desk) 100%
+    );
+    border: 1px solid color-mix(in srgb, var(--color-pencil) 30%, transparent);
+  }
+
+  .card-hover {
+    transition: border-color 180ms ease, transform 180ms ease;
+  }
+
+  .card-hover:hover {
+    border-color: color-mix(in srgb, var(--color-pencil) 60%, transparent);
+    transform: translateY(-2px);
+  }
+
+  /* One warm wash behind the hero. The stamp red is the only accent. */
+  .hero-wash {
+    background:
+      radial-gradient(
+        60rem 32rem at 12% -10%,
+        color-mix(in srgb, var(--color-stamp) 16%, transparent) 0%,
+        transparent 62%
+      ),
+      radial-gradient(
+        48rem 28rem at 96% 0%,
+        color-mix(in srgb, var(--color-cleared) 12%, transparent) 0%,
+        transparent 60%
+      );
+  }
+
+  .rule-top {
+    border-top: 1px solid color-mix(in srgb, var(--color-pencil) 26%, transparent);
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--color-pencil) 45%, transparent);
+    border-radius: 999px;
+    padding: 0.375rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-pencil);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 2px;
+    padding: 0.75rem 1.25rem;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-decoration: none;
+    transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+  }
+
+  .btn-primary {
+    background: var(--color-form);
+    color: var(--color-slate);
+    border: 1px solid var(--color-form);
+  }
+
+  .btn-primary:hover { background: #fff; border-color: #fff; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--color-form);
+    border: 1px solid color-mix(in srgb, var(--color-pencil) 55%, transparent);
+  }
+
+  .btn-ghost:hover { border-color: var(--color-form); }
+
+  .shell { max-width: 78rem; margin-inline: auto; }
+
   /* Small uppercase label, the voice of a form field. */
   .label {
     font-family: var(--font-display);
