@@ -64,6 +64,10 @@ _MCP_RESPONSE_HEADERS = {
 
 _ALLOWED_RUNTIME_METHODS = frozenset(
     {
+        # A modern client negotiates with server/discover before initialize.
+        # Without it no real MCP client can complete a handshake through the
+        # proxy at all. It is a read-only capability probe.
+        "server/discover",
         "initialize",
         "notifications/cancelled",
         "notifications/initialized",
@@ -382,13 +386,10 @@ def create_proxy_router(
             # inventoried under one protocol version. Forwarding an approved
             # call under a different one would enforce a policy derived from a
             # surface that was never audited.
+            # Only the header is compared. An initialize body carries the
+            # version the client is requesting, not the one it settles on, so
+            # refusing on that would break every real handshake.
             supplied_protocol = request.headers.get("mcp-protocol-version")
-            if supplied_protocol is None and payload.get("method") == "initialize":
-                initialize_params = payload.get("params")
-                if isinstance(initialize_params, dict):
-                    negotiated = initialize_params.get("protocolVersion")
-                    if isinstance(negotiated, str):
-                        supplied_protocol = negotiated
             if (
                 supplied_protocol is not None
                 and case.protocol_version is not None

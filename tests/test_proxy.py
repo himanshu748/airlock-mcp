@@ -1711,7 +1711,10 @@ def test_the_audited_protocol_version_is_forwarded(tmp_path):
     assert len(forwarded) == 1
 
 
-def test_initialize_cannot_negotiate_away_from_the_audited_version(tmp_path):
+def test_initialize_is_not_refused_for_the_version_it_requests(tmp_path):
+    # An initialize body carries the version the client is asking for, not the
+    # one it settles on. Refusing on it breaks every real MCP handshake, which
+    # is how this was found: a real client could not connect through the proxy.
     store, case_id = _sealed_case_for_protocol_test(tmp_path)
     forwarded = []
     with TestClient(_protocol_app(store, forwarded)) as client:
@@ -1725,8 +1728,23 @@ def test_initialize_cannot_negotiate_away_from_the_audited_version(tmp_path):
             },
         )
 
-    assert response.status_code == 409
-    assert forwarded == []
+    assert response.status_code == 200
+    assert len(forwarded) == 1
+
+
+def test_a_real_client_can_negotiate_with_server_discover(tmp_path):
+    # Without server/discover in the allowed surface, no modern MCP client can
+    # complete a handshake through the proxy.
+    store, case_id = _sealed_case_for_protocol_test(tmp_path)
+    forwarded = []
+    with TestClient(_protocol_app(store, forwarded)) as client:
+        response = client.post(
+            f"/cases/{case_id}/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "server/discover"},
+        )
+
+    assert response.status_code == 200
+    assert len(forwarded) == 1
 
 
 def test_the_pinned_transport_cannot_be_replaced_by_an_injected_client(tmp_path):
