@@ -1,3 +1,4 @@
+import json
 import pytest
 
 from airlock.case_service import CaseService
@@ -238,3 +239,80 @@ def test_connector_manifest_rejects_tampered_proxy_url(tmp_path):
                 f"https://airlock.example/cases/{sealed.case_id}/mcp"
             ),
         )
+
+
+def test_connector_manifest_carries_the_proxy_credential_when_one_is_set(tmp_path):
+    # Without it the artifact does not paste into a harness unedited: the
+    # proxy answers 401 and the connector never connects.
+    service, case = _inventoried_case(tmp_path)
+    sealed = service.seal_case(
+        case.case_id,
+        choice=DecisionChoice.APPROVE_ALL,
+        approved_tools=[],
+        approval_required_tools=[],
+        decision_source="trueforge_approval",
+    )
+
+    manifest = compile_connector_manifest(
+        sealed,
+        connector_name="fixture-via-airlock",
+        proxy_authorization="Bearer runtime-token",
+    )["manifest"]
+
+    assert manifest["auth"] == {
+        "type": "header",
+        "headers": {"Authorization": "Bearer runtime-token"},
+    }
+
+
+def test_connector_manifest_omits_auth_when_the_proxy_has_no_token(tmp_path):
+    service, case = _inventoried_case(tmp_path)
+    sealed = service.seal_case(
+        case.case_id,
+        choice=DecisionChoice.APPROVE_ALL,
+        approved_tools=[],
+        approval_required_tools=[],
+        decision_source="trueforge_approval",
+    )
+
+    manifest = compile_connector_manifest(
+        sealed, connector_name="fixture-via-airlock"
+    )["manifest"]
+
+    assert "auth" not in manifest
+
+
+def test_an_empty_proxy_credential_is_refused(tmp_path):
+    service, case = _inventoried_case(tmp_path)
+    sealed = service.seal_case(
+        case.case_id,
+        choice=DecisionChoice.APPROVE_ALL,
+        approved_tools=[],
+        approval_required_tools=[],
+        decision_source="trueforge_approval",
+    )
+
+    with pytest.raises(PolicyInvariantError, match="cannot be empty"):
+        compile_connector_manifest(
+            sealed,
+            connector_name="fixture-via-airlock",
+            proxy_authorization="   ",
+        )
+
+
+def test_the_report_and_policy_stay_free_of_the_proxy_credential(tmp_path):
+    # Only the connector carries a secret. The evidence report and the policy
+    # remain shareable.
+    service, case = _inventoried_case(tmp_path)
+    sealed = service.seal_case(
+        case.case_id,
+        choice=DecisionChoice.APPROVE_ALL,
+        approved_tools=[],
+        approval_required_tools=[],
+        decision_source="trueforge_approval",
+    )
+
+    policy = compile_policy(sealed, connector_name="fixture-via-airlock")
+
+    assert "runtime-token" not in json.dumps(policy)
+    assert "Authorization" not in json.dumps(policy)

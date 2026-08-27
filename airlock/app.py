@@ -192,6 +192,11 @@ def create_app(
         audit_executor=audit_executor,
         observation_capabilities_by_mode=configured_observation_modes,
         observation_target_urls_by_mode=configured_observation_targets,
+        proxy_authorization=(
+            f"Bearer {case_proxy_bearer_token}"
+            if case_proxy_bearer_token is not None
+            else None
+        ),
     )
     transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,

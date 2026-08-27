@@ -109,6 +109,18 @@ Writes use a temporary file, `fsync` and atomic replacement. Case directories us
 
 Before policy emission, the compiler revalidates completed-audit state, successful probe coverage, a complete detector matrix, unique catalog membership, selected tool membership, enforcement activation and the case proxy URL. Every approved tool with a persisted finding is placed by literal name in `require_approval_for_tools`. Declared write or destructive tools receive the same minimum gate.
 
+### Artifact sensitivity
+
+`airlock-report.json` and `airlock-policy.json` contain no secrets and can be
+shared as evidence.
+
+`airlock-connector.json` is different. When `AIRLOCK_CASE_PROXY_BEARER_TOKEN`
+is set, the manifest carries that token in an `auth` header block, because
+without it the harness cannot connect and the artifact does not paste in
+unedited. Treat that file as a credential. It is written `0600` and its
+download endpoint requires the same token it contains, so fetching it needs
+the credential already in hand.
+
 ## Connection controls
 
 - Remote targets require HTTPS. Loopback-only HTTP must be enabled explicitly.

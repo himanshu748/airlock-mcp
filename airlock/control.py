@@ -266,6 +266,7 @@ def create_control_server(
         EvidenceMode, Iterable[str]
     ]
     | None = None,
+    proxy_authorization: str | None = None,
 ) -> MCPServer:
     configured_capabilities = dict(
         observation_capabilities_by_mode
@@ -476,6 +477,7 @@ def create_control_server(
             expected_proxy_url=(
                 f"{case_service.public_base_url}/cases/{case.case_id}/mcp"
             ),
+            proxy_authorization=proxy_authorization,
         )
         policy_path = store.write_json_artifact(
             case_id,
