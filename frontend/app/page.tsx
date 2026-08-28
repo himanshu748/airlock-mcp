@@ -17,7 +17,7 @@ const STEPS = [
   {
     n: "01",
     title: "Point it at a server",
-    body: "Give Airlock a URL you are considering connecting. It opens a case, pins the address the hostname resolved to and records every call and result from there on.",
+    body: "Give Airlock a URL you are considering connecting. It validates the target, resolves the hostname once and pins that address for every connection the case makes afterwards.",
   },
   {
     n: "02",
