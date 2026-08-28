@@ -1,0 +1,8 @@
+{
+  "manifest": {
+    "type": "remote",
+    "name": "airlock-control",
+    "url": "https://airlock.example/airlock-control/mcp",
+    "description": "Airlock audit control plane"
+  }
+}
