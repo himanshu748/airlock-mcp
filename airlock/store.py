@@ -85,6 +85,14 @@ class JsonCaseStore:
         self.save_case(record)
         return record
 
+    def list_case_ids(self) -> list[str]:
+        with self._lock:
+            return sorted(
+                entry.name
+                for entry in self.root.iterdir()
+                if entry.is_dir() and _CASE_ID_PATTERN.fullmatch(entry.name)
+            )
+
     def load_case(self, case_id: str) -> CaseRecord:
         with self._lock:
             report_path = self._case_directory(case_id) / "airlock-report.json"

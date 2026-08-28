@@ -3,10 +3,12 @@ from __future__ import annotations
 import secrets
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
+from ipaddress import ip_address
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.datastructures import Headers
 from starlette.responses import Response
@@ -24,7 +26,10 @@ from .fixtures import (
 )
 from .models import EvidenceMode, ObservationCapabilities, TargetBinding
 from .proxy import create_proxy_router
+from .read_api import create_read_router
 from .store import CaseIntegrityError, JsonCaseStore
+
+_UI_DIRECTORY = Path(__file__).resolve().parent / "ui"
 
 
 _DOWNLOADABLE_ARTIFACTS = frozenset(
@@ -64,6 +69,94 @@ class _BearerPathMiddleware:
                 await response(scope, receive, send)
                 return
         await self.app(scope, receive, send)
+
+# The interface renders text supplied by the server under audit. React escapes
+# it by construction, and this is the second line: even if markup did reach the
+# DOM, "default-src 'none'" plus "connect-src 'self'" leaves it nowhere to send
+# anything. script-src needs 'unsafe-inline' because a Next.js static export
+# carries its hydration payload in two inline script tags, and a static export
+# cannot use per-response nonces.
+_UI_CSP = "; ".join(
+    (
+        "default-src 'none'",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+    )
+)
+
+_UI_SECURITY_HEADERS = (
+    (b"content-security-policy", _UI_CSP.encode("ascii")),
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"x-frame-options", b"DENY"),
+)
+
+
+def _is_loopback_client(scope: Scope) -> bool:
+    client = scope.get("client")
+    if not client:
+        # No peer address available. Fail closed rather than guess.
+        return False
+    try:
+        return ip_address(str(client[0]).strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+class _OperatorUiSecurityMiddleware:
+    """Hold the interface's loopback boundary and attach its security headers.
+
+    The read API has no authentication, so the boundary has to be enforced on
+    the request itself. Checking only the configured bind host would be
+    bypassed by any caller that builds the application directly rather than
+    going through run().
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = str(scope.get("path", ""))
+        guarded = scope["type"] == "http" and (
+            path == "/ui" or path.startswith("/ui/") or path.startswith("/api/")
+        )
+        if not guarded:
+            await self.app(scope, receive, send)
+            return
+
+        if not _is_loopback_client(scope):
+            response = Response(
+                "The Airlock operator interface is reachable only from loopback",
+                status_code=403,
+                headers={
+                    name.decode("ascii"): value.decode("ascii")
+                    for name, value in _UI_SECURITY_HEADERS
+                },
+            )
+            await response(scope, receive, send)
+            return
+
+        async def send_with_headers(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                existing = [
+                    (name, value)
+                    for name, value in message.get("headers", [])
+                    if name.lower()
+                    not in {name for name, _ in _UI_SECURITY_HEADERS}
+                ]
+                message = {
+                    **message,
+                    "headers": existing + list(_UI_SECURITY_HEADERS),
+                }
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 def create_app(
@@ -107,6 +200,7 @@ def create_app(
     proxy_read_timeout_seconds: float = 60.0,
     max_runtime_stream_seconds: float = 300.0,
     mount_owned_fixtures: bool = False,
+    enable_operator_ui: bool = False,
     fixture_root: Path | str | None = None,
     dishonest_fixture_behaviors: DishonestBehaviors | None = None,
 ) -> FastAPI:
@@ -332,6 +426,18 @@ def create_app(
             max_stream_duration_seconds=max_runtime_stream_seconds,
         )
     )
+
+    if enable_operator_ui:
+        app.add_middleware(_OperatorUiSecurityMiddleware)
+        # Read-only operator views. These return declared tool text verbatim, so
+        # they must stay on a loopback interface behind the operator's own
+        # network boundary. The UI renders every value as inert text.
+        app.include_router(create_read_router(store))
+        app.mount(
+            "/ui",
+            StaticFiles(directory=str(_UI_DIRECTORY), html=True),
+            name="operator-ui",
+        )
 
     @app.get("/cases/{case_id}/artifacts/{artifact_name}")
     async def download_case_artifact(

@@ -30,6 +30,9 @@ airlock-backend = "airlock.main:run"
 [tool.setuptools.packages.find]
 include = ["airlock*"]
 
+[tool.setuptools.package-data]
+airlock = ["ui/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
