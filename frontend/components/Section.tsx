@@ -23,7 +23,9 @@ export function Section({
             {lede}
           </p>
         )}
-        <div className="mt-12">{children}</div>
+        <div className="mt-12" data-reveal>
+          {children}
+        </div>
       </div>
     </section>
   );

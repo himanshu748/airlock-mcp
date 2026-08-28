@@ -3,6 +3,7 @@ import { SiteNav } from "@/components/SiteNav";
 import { Section } from "@/components/Section";
 import { DivergenceCard } from "@/components/DivergenceCard";
 import { RunProof } from "@/components/RunProof";
+import { Reveal } from "@/components/Reveal";
 import { DISCLAIMER } from "./Disclaimer";
 
 const STATS = [
@@ -16,7 +17,7 @@ const STEPS = [
   {
     n: "01",
     title: "Point it at a server",
-    body: "Give Airlock a URL you are considering connecting. It opens a case and stands a recording proxy in front of the target.",
+    body: "Give Airlock a URL you are considering connecting. It opens a case, pins the address the hostname resolved to and records every call and result from there on.",
   },
   {
     n: "02",
@@ -50,7 +51,7 @@ const CHECKS = [
   },
   {
     name: "Undeclared egress",
-    signal: "The proxy saw a request to a host outside the declared scope.",
+    signal: "The server reached a host outside its declared scope. Needs a sensor that can see the server's own network.",
     verdict: "Block",
     tone: "stamp",
   },
@@ -109,6 +110,7 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen">
       <SiteNav />
+      <Reveal />
 
       {/* Hero */}
       <section className="hero-wash relative overflow-hidden px-6 pt-20 pb-24 lg:px-8 lg:pt-28 lg:pb-32">
