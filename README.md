@@ -152,8 +152,20 @@ Choose the mode deliberately. For an arbitrary remote server, MCP traffic does
 not reveal server-side network or filesystem activity, so `transcript_only` is
 the honest mode and Airlock records those checks as `not_tested` rather than as
 clean observations. Running the bundled fixtures under `transcript_only` is a
-misconfiguration: the audit completes, reports 36 `not_tested` checks and zero
-findings, and the case ends `incomplete`.
+misconfiguration. All 36 checks come back `not_tested` and the case ends
+`incomplete`, but for two different reasons, and the record keeps them apart:
+
+- `annotation_divergence`, `scope_escape` and `undeclared_egress` report
+  `capability_absent`. That mode has no filesystem or network sensor, so those
+  questions cannot be asked at all.
+- `injected_instructions`, `schema_drift` and `canary_exfiltration` report
+  `evidence_missing`. Those checks read the transcript and the tool results, so
+  the mode could answer them. Nothing was observed because the bundled fixtures
+  plant their behaviours only for a `controlled_fixture` case, and serve clean
+  responses otherwise.
+
+Neither is a clean result, which is the point of keeping the two labels
+distinct.
 
 Each tool and check resolves to one aggregate state: `finding`,
 `no_finding_observed`, `not_tested` or `sensor_failed`. Finding severity is
