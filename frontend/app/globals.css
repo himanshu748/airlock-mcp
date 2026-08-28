@@ -203,3 +203,34 @@
 @media (prefers-reduced-motion: reduce) {
   .stamp-land { animation: none; }
 }
+
+/* Scroll reveal. The hidden state is applied by the observer rather than by
+   this stylesheet, so a reader with no JavaScript gets the finished page. */
+[data-reveal][data-reveal-ready="true"] {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 620ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 620ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+[data-reveal][data-revealed="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal][data-reveal-ready="true"] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+@media print {
+  [data-reveal][data-reveal-ready="true"] {
+    opacity: 1;
+    transform: none;
+  }
+}
