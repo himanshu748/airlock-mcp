@@ -366,22 +366,38 @@ def test_read_evidence_never_returns_raw_event_details(tmp_path):
         ),
     )
 
+    # Default: counts travel, per-event provenance does not, so a verdict fits
+    # in one response.
     payload = _call(
         server,
         "read_evidence",
         {"case_id": opened["case_id"]},
     ).structured_content
 
-    serialized = json.dumps(payload)
-    assert "ignore previous instructions" not in serialized
-    assert payload["observations"] == [
+    assert "ignore previous instructions" not in json.dumps(payload)
+    assert payload["observations"] == []
+    assert payload["observation_count"] == 1
+    assert payload["observation_summary"]["by_kind"]["tool_result"] == 1
+    assert payload["observation_summary"]["by_sensor"]["mcp_transcript"] == 1
+    assert payload["observations_omitted_note"]
+
+    # Paged: the detail is available, and still carries no raw result text.
+    detailed = _call(
+        server,
+        "read_evidence",
+        {"case_id": opened["case_id"], "include_observations": True},
+    ).structured_content
+
+    assert "ignore previous instructions" not in json.dumps(detailed)
+    assert detailed["observations_returned"] == 1
+    assert detailed["observations"] == [
         {
             "event_id": "ev_safe_summary",
-            "probe_ref": payload["observations"][0]["probe_ref"],
+            "probe_ref": detailed["observations"][0]["probe_ref"],
             "tool_id": "tool_0002",
             "kind": "tool_result",
             "sensor": "mcp_transcript",
-            "observed_at": payload["observations"][0]["observed_at"],
+            "observed_at": detailed["observations"][0]["observed_at"],
         }
     ]
 
@@ -725,3 +741,85 @@ def test_case_artifact_download_is_bearer_protected_and_name_allowlisted(tmp_pat
     assert report.headers["content-disposition"].startswith("attachment;")
     assert report.headers["cache-control"] == "no-store"
     assert unknown.status_code == 404
+
+
+def test_read_evidence_fits_a_verdict_in_one_response(tmp_path):
+    # A real six-tool audit returned 43KB by default, which truncated in the
+    # model and made the verdict pass impossible. The checks are what Pass 4
+    # needs; the event log is what made it too large.
+    store, _, _, server = _control(tmp_path)
+    opened = _call(
+        server,
+        "open_case",
+        {"target_url": "https://fixture.example/mcp"},
+    ).structured_content
+    case_id = opened["case_id"]
+    _call(server, "list_declared_tools", {"case_id": case_id})
+
+    for index in range(200):
+        store.append_event(
+            case_id,
+            EvidenceEvent(
+                event_id=f"ev_{index:04d}",
+                probe_id=f"pr_{index:04d}",
+                tool="search_docs",
+                kind=EventKind.TOOL_RESULT,
+                sensor="mcp_transcript",
+                details={"response_digest": "sha256:" + "0" * 64},
+            ),
+        )
+
+    payload = _call(
+        server, "read_evidence", {"case_id": case_id}
+    ).structured_content
+    serialized = json.dumps(payload)
+
+    assert payload["observation_count"] == 200
+    assert payload["observations"] == []
+    # The whole point: the response stays small however long the audit ran.
+    assert len(serialized) < 8000, len(serialized)
+
+
+def test_read_evidence_pages_the_observation_detail(tmp_path):
+    store, _, _, server = _control(tmp_path)
+    opened = _call(
+        server,
+        "open_case",
+        {"target_url": "https://fixture.example/mcp"},
+    ).structured_content
+    case_id = opened["case_id"]
+    _call(server, "list_declared_tools", {"case_id": case_id})
+    for index in range(10):
+        store.append_event(
+            case_id,
+            EvidenceEvent(
+                event_id=f"ev_{index:04d}",
+                probe_id=f"pr_{index:04d}",
+                tool="search_docs",
+                kind=EventKind.TOOL_RESULT,
+                sensor="mcp_transcript",
+                details={},
+            ),
+        )
+
+    first = _call(
+        server,
+        "read_evidence",
+        {"case_id": case_id, "include_observations": True, "observation_limit": 4},
+    ).structured_content
+    second = _call(
+        server,
+        "read_evidence",
+        {
+            "case_id": case_id,
+            "include_observations": True,
+            "observation_limit": 4,
+            "observation_offset": 4,
+        },
+    ).structured_content
+
+    assert first["observations_returned"] == 4
+    assert second["observations_returned"] == 4
+    assert first["observations"][0]["event_id"] == "ev_0000"
+    assert second["observations"][0]["event_id"] == "ev_0004"
+    assert second["observation_offset"] == 4

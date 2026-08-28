@@ -195,7 +195,13 @@ def _inventory_payload(case: CaseRecord) -> dict[str, Any]:
     }
 
 
-def _evidence_payload(case: CaseRecord) -> dict[str, Any]:
+def _evidence_payload(
+    case: CaseRecord,
+    *,
+    include_observations: bool = False,
+    observation_offset: int = 0,
+    observation_limit: int = 50,
+) -> dict[str, Any]:
     # Event details can contain untrusted tool output. The control MCP returns only
     # provenance metadata and detector findings so raw content does not re-enter
     # the model through read_evidence.
@@ -217,6 +223,18 @@ def _evidence_payload(case: CaseRecord) -> dict[str, Any]:
         }
         for event in case.events
     ]
+    # The full event list grows with every probe and runtime call, and at the
+    # default budget it alone exceeds what a model can take in one response.
+    # Pass 4 needs the checks, not the per-event provenance, so the counts
+    # travel by default and the detail is paged on request.
+    summary: dict[str, Any] = {"by_kind": {}, "by_sensor": {}}
+    for event in observations:
+        summary["by_kind"][event["kind"]] = (
+            summary["by_kind"].get(event["kind"], 0) + 1
+        )
+        summary["by_sensor"][event["sensor"]] = (
+            summary["by_sensor"].get(event["sensor"], 0) + 1
+        )
     return {
         **_case_summary(case),
         "checks": [
@@ -239,8 +257,28 @@ def _evidence_payload(case: CaseRecord) -> dict[str, Any]:
             }
             for finding in case.checks
         ],
-        "observations": observations,
+        "observation_summary": summary,
         "observation_count": len(observations),
+        "observations": (
+            observations[observation_offset : observation_offset + observation_limit]
+            if include_observations
+            else []
+        ),
+        "observations_returned": (
+            len(observations[observation_offset : observation_offset + observation_limit])
+            if include_observations
+            else 0
+        ),
+        "observation_offset": observation_offset if include_observations else 0,
+        "observations_omitted_note": (
+            None
+            if include_observations
+            else (
+                "Per-event provenance is omitted so the verdict fits in one "
+                "response. Call read_evidence with include_observations=true "
+                "to page through it."
+            )
+        ),
     }
 
 
@@ -387,8 +425,18 @@ def create_control_server(
         annotations=_READ_ONLY,
     )
     @_anticipated_errors
-    async def read_evidence(case_id: str) -> dict[str, Any]:
-        return _evidence_payload(store.load_case(case_id))
+    async def read_evidence(
+        case_id: str,
+        include_observations: bool = False,
+        observation_offset: Annotated[int, Field(ge=0)] = 0,
+        observation_limit: Annotated[int, Field(ge=1, le=200)] = 50,
+    ) -> dict[str, Any]:
+        return _evidence_payload(
+            store.load_case(case_id),
+            include_observations=include_observations,
+            observation_offset=observation_offset,
+            observation_limit=observation_limit,
+        )
 
     @server.tool(
         name="seal_case",
