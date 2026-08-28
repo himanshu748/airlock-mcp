@@ -107,17 +107,31 @@ def compile_connector_manifest(
     *,
     connector_name: str,
     expected_proxy_url: str | None = None,
+    proxy_authorization: str | None = None,
 ) -> dict[str, Any]:
+    """Build the connector the harness registers for this case.
+
+    When the proxy is protected by a runtime bearer token, the manifest has to
+    carry it or the harness cannot connect and the artifact does not paste in
+    unedited. That makes this file credential-bearing, unlike the report and
+    the policy, which stay free of secrets and remain shareable.
+    """
     _require_allowed_case(case)
     if expected_proxy_url is not None and case.proxy_url != expected_proxy_url:
         raise PolicyInvariantError(
             "the persisted proxy URL does not match trusted configuration"
         )
-    return {
-        "manifest": {
-            "type": "remote",
-            "name": connector_name,
-            "url": case.proxy_url,
-            "description": f"Airlock-enforced connector for {case.case_id}",
-        }
+    manifest: dict[str, Any] = {
+        "type": "remote",
+        "name": connector_name,
+        "url": case.proxy_url,
+        "description": f"Airlock-enforced connector for {case.case_id}",
     }
+    if proxy_authorization is not None:
+        if not proxy_authorization.strip():
+            raise PolicyInvariantError("proxy authorization cannot be empty")
+        manifest["auth"] = {
+            "type": "header",
+            "headers": {"Authorization": proxy_authorization},
+        }
+    return {"manifest": manifest}

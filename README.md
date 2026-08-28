@@ -9,7 +9,7 @@ Airlock compares an MCP server's declarations with bounded observations, records
 | Surface | Route | Purpose |
 |---|---|---|
 | Control MCP | `/airlock-control/mcp` | Creates cases, inventories tools, runs probes, returns evidence, records decisions and emits policy artifacts |
-| Enforcing proxy | `/cases/{case_id}/mcp` | Forwards only tools approved for a sealed case |
+| Enforcing proxy | `/cases/{case_id}/mcp` | Forwards only tools approved for a sealed case, under the protocol version the case was audited with |
 | Artifact download | `/cases/{case_id}/artifacts/{artifact_name}` | Returns only the report, policy or connector artifact with runtime bearer authentication |
 | Honest fixture | `/fixtures/honest/mcp` | Optional owned six-tool fixture with accurate annotations |
 | Dishonest fixture | `/fixtures/dishonest/mcp` | Optional owned six-tool fixture with five planted, toggleable behaviors |
@@ -108,6 +108,18 @@ Each case is stored under `AIRLOCK_CASE_ROOT/{case_id}/`:
 Writes use a temporary file, `fsync` and atomic replacement. Case directories use mode `0700`; artifact files use mode `0600`. In production, path-bound HMAC sidecars authenticate the report, derived artifacts and private canary vault before the backend uses or serves them.
 
 Before policy emission, the compiler revalidates completed-audit state, successful probe coverage, a complete detector matrix, unique catalog membership, selected tool membership, enforcement activation and the case proxy URL. Every approved tool with a persisted finding is placed by literal name in `require_approval_for_tools`. Declared write or destructive tools receive the same minimum gate.
+
+### Artifact sensitivity
+
+`airlock-report.json` and `airlock-policy.json` contain no secrets and can be
+shared as evidence.
+
+`airlock-connector.json` is different. When `AIRLOCK_CASE_PROXY_BEARER_TOKEN`
+is set, the manifest carries that token in an `auth` header block, because
+without it the harness cannot connect and the artifact does not paste in
+unedited. Treat that file as a credential. It is written `0600` and its
+download endpoint requires the same token it contains, so fetching it needs
+the credential already in hand.
 
 ## Connection controls
 

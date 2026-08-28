@@ -43,6 +43,11 @@ from .store import CaseIntegrityError
 _EXPECTED_CANARY_LABELS = ("document_secret",)
 
 
+# A teardown that starts after the audit deadline still has to be bounded,
+# or a stalled shutdown hangs the caller instead of the audit.
+_TEARDOWN_GRACE_SECONDS = 5.0
+
+
 class AuditExecutor:
     def __init__(
         self,
@@ -56,6 +61,7 @@ class AuditExecutor:
         max_catalog_bytes: int = 2 * 1024 * 1024,
         max_audit_response_bytes: int = 4 * 1024 * 1024,
         audit_operation_timeout_seconds: float = 60.0,
+        audit_total_timeout_seconds: float = 240.0,
         probe_planning_timeout_seconds: float = 5.0,
         probe_planning_memory_bytes: int = 512 * 1024 * 1024,
     ) -> None:
@@ -71,6 +77,7 @@ class AuditExecutor:
                 raise ValueError(f"{name} must be a positive integer")
         for name, value in {
             "audit_operation_timeout_seconds": audit_operation_timeout_seconds,
+            "audit_total_timeout_seconds": audit_total_timeout_seconds,
             "probe_planning_timeout_seconds": probe_planning_timeout_seconds,
         }.items():
             if (
@@ -97,6 +104,7 @@ class AuditExecutor:
         self.audit_operation_timeout_seconds = float(
             audit_operation_timeout_seconds
         )
+        self.audit_total_timeout_seconds = float(audit_total_timeout_seconds)
         self.probe_planning_timeout_seconds = float(
             probe_planning_timeout_seconds
         )
@@ -108,6 +116,7 @@ class AuditExecutor:
         *,
         target: Any = None,
         auth_context_fingerprint: str | None = None,
+        deadline: float | None = None,
     ) -> CaseRecord:
         case = self.case_service.store.load_case(case_id)
         if target is None:
@@ -120,15 +129,17 @@ class AuditExecutor:
         serialized_catalog_bytes = 0
 
         try:
-            inventory_deadline = (
+            inventory_deadline = _earliest_deadline(
                 asyncio.get_running_loop().time()
-                + self.audit_operation_timeout_seconds
+                + self.audit_operation_timeout_seconds,
+                deadline,
             )
             async with _open_client_with_timeout(
                 target_reference,
                 binding=case.target_binding if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
+                deadline=inventory_deadline,
                 timeout_seconds=_remaining_operation_seconds(
                     inventory_deadline
                 ),
@@ -213,10 +224,14 @@ class AuditExecutor:
         per_tool_cap: int = 12,
         auth_context_fingerprint: str | None = None,
     ) -> CaseRecord:
+        audit_deadline = (
+            asyncio.get_running_loop().time() + self.audit_total_timeout_seconds
+        )
         case = await self.inventory(
             case_id,
             target=target,
             auth_context_fingerprint=auth_context_fingerprint,
+            deadline=audit_deadline,
         )
         if case.status != CaseStatus.INVENTORIED:
             return case
@@ -240,9 +255,11 @@ class AuditExecutor:
                 binding=case.target_binding if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
-                timeout_seconds=self.audit_operation_timeout_seconds,
+                deadline=audit_deadline,
+                timeout_seconds=self._call_timeout(audit_deadline),
             ) as client:
                 for declaration in case.declared_tools:
+                    _remaining_operation_seconds(audit_deadline)
                     current = self.case_service.store.load_case(case_id)
                     remaining = max(0, current.probe_budget - current.probes_run)
                     if remaining == 0:
@@ -260,7 +277,7 @@ class AuditExecutor:
                             canary=next(iter(canaries.values()), None),
                             case_budget=per_tool_cap,
                             per_tool_cap=per_tool_cap,
-                            timeout_seconds=self.probe_planning_timeout_seconds,
+                            timeout_seconds=self._planning_timeout(audit_deadline),
                             memory_bytes=self.probe_planning_memory_bytes,
                         )
                     except ProbePlanningError:
@@ -282,6 +299,7 @@ class AuditExecutor:
                             canaries=canaries,
                             observer=observer,
                             observer_offset=observer_offset,
+                            deadline=audit_deadline,
                         )
         except Exception:
             return self._record_transport_failure(
@@ -302,9 +320,16 @@ class AuditExecutor:
         case_budget: int = 48,
         per_tool_cap: int = 12,
     ) -> CaseRecord:
+        audit_deadline = (
+            asyncio.get_running_loop().time() + self.audit_total_timeout_seconds
+        )
         case = self.case_service.store.load_case(case_id)
         if case.status == CaseStatus.CREATED:
-            case = await self.inventory(case_id, target=target)
+            case = await self.inventory(
+                case_id,
+                target=target,
+                deadline=audit_deadline,
+            )
         if case.status != CaseStatus.INVENTORIED and case.status != CaseStatus.PROBING:
             return case
         declaration = next(
@@ -335,7 +360,7 @@ class AuditExecutor:
                 canary=next(iter(canaries.values()), None),
                 case_budget=per_tool_cap,
                 per_tool_cap=per_tool_cap,
-                timeout_seconds=self.probe_planning_timeout_seconds,
+                timeout_seconds=self._planning_timeout(audit_deadline),
                 memory_bytes=self.probe_planning_memory_bytes,
             )
         except ProbePlanningError:
@@ -357,7 +382,8 @@ class AuditExecutor:
                 binding=case.target_binding if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
-                timeout_seconds=self.audit_operation_timeout_seconds,
+                deadline=audit_deadline,
+                timeout_seconds=self._call_timeout(audit_deadline),
             ) as client:
                 for item in planned:
                     observer_offset = await self._execute_probe(
@@ -367,6 +393,7 @@ class AuditExecutor:
                         canaries=canaries,
                         observer=observer,
                         observer_offset=observer_offset,
+                        deadline=audit_deadline,
                     )
         except Exception:
             return self._record_transport_failure(
@@ -410,6 +437,24 @@ class AuditExecutor:
         self.case_service.store.save_case(partial)
         return partial
 
+    def _planning_timeout(self, deadline: float | None) -> float:
+        """Clamp probe planning to the smaller of its own budget and the audit's."""
+        if deadline is None:
+            return self.probe_planning_timeout_seconds
+        return min(
+            self.probe_planning_timeout_seconds,
+            _remaining_operation_seconds(deadline),
+        )
+
+    def _call_timeout(self, deadline: float | None) -> float:
+        """Clamp a single call to the smaller of the per-call and audit budgets."""
+        if deadline is None:
+            return self.audit_operation_timeout_seconds
+        return min(
+            self.audit_operation_timeout_seconds,
+            _remaining_operation_seconds(deadline),
+        )
+
     async def _execute_probe(
         self,
         case_id: str,
@@ -419,6 +464,7 @@ class AuditExecutor:
         canaries: dict[str, str],
         observer: Any,
         observer_offset: int,
+        deadline: float | None = None,
     ) -> int:
         arguments_digest = _digest(probe.arguments)
         supplied_ids = [
@@ -478,7 +524,7 @@ class AuditExecutor:
                     probe.arguments,
                     meta=metadata,
                 ),
-                timeout=self.audit_operation_timeout_seconds,
+                timeout=self._call_timeout(deadline),
             )
             raw_result = result.model_dump(mode="json", by_alias=True)
             response_digest = _digest(raw_result)
@@ -821,6 +867,11 @@ def _digest(value: Any) -> str:
     return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
 
+def _earliest_deadline(*deadlines: float | None) -> float:
+    present = [value for value in deadlines if value is not None]
+    return min(present)
+
+
 def _remaining_operation_seconds(deadline: float) -> float:
     remaining = deadline - asyncio.get_running_loop().time()
     if remaining <= 0:
@@ -833,26 +884,41 @@ async def _open_client_with_timeout(
     target: Any,
     *,
     timeout_seconds: float,
+    deadline: float | None = None,
     binding: TargetBinding | None = None,
     headers: Mapping[str, str] | None = None,
     max_response_bytes: int = 4 * 1024 * 1024,
 ):
+    """Open a client, bounding both setup and teardown by the audit deadline.
+
+    Teardown recomputes what is left rather than reusing the value captured at
+    open time, so a stalled shutdown cannot extend the audit past its bound.
+    """
+
+    def budget() -> float:
+        if deadline is None:
+            return timeout_seconds
+        return min(timeout_seconds, _remaining_operation_seconds(deadline))
+
     manager = _open_client(
         target,
         binding=binding,
         headers=headers,
         max_response_bytes=max_response_bytes,
     )
-    client = await asyncio.wait_for(
-        manager.__aenter__(),
-        timeout=timeout_seconds,
-    )
+    client = await asyncio.wait_for(manager.__aenter__(), timeout=budget())
     try:
         yield client
     finally:
+        try:
+            teardown_budget = budget()
+        except asyncio.TimeoutError:
+            # The audit is already over its bound. Still bound the teardown so
+            # a stalled shutdown cannot hang the caller.
+            teardown_budget = _TEARDOWN_GRACE_SECONDS
         await asyncio.wait_for(
             manager.__aexit__(None, None, None),
-            timeout=timeout_seconds,
+            timeout=teardown_budget,
         )
 
 

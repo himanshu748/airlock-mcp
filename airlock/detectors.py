@@ -324,12 +324,18 @@ def detect_findings(
                     "evidence."
                 )
                 sensor = "aggregate"
-            else:
+            elif not _check_capability_available(check, capabilities):
                 explanation = (
                     f"The {check.value.replace('_', ' ')} check was not tested because "
-                    "the required sensor or completed probe evidence was unavailable."
+                    "this case has no sensor that can observe it."
                 )
-                sensor = "unavailable"
+                sensor = "capability_absent"
+            else:
+                explanation = (
+                    f"The {check.value.replace('_', ' ')} check has a configured sensor "
+                    "but produced no completed probe evidence for this tool."
+                )
+                sensor = "evidence_missing"
             aggregate[key] = Finding(
                 tool=declaration.name,
                 check=check,
@@ -344,6 +350,24 @@ def detect_findings(
         for tool_name in sorted(declarations_by_name)
         for check in CheckName
     ]
+
+
+def _check_capability_available(
+    check: CheckName,
+    capabilities: ObservationCapabilities,
+) -> bool:
+    """Whether this case claims a sensor able to observe the check at all."""
+    if check == CheckName.INJECTED_INSTRUCTIONS:
+        return capabilities.tool_results
+    if check == CheckName.SCHEMA_DRIFT:
+        return capabilities.mcp_traffic
+    if check == CheckName.CANARY_EXFILTRATION:
+        # A canary can surface in an outbound request, which needs the egress
+        # sensor, or in a tool result, which the transcript already carries.
+        return capabilities.server_egress or capabilities.tool_results
+    if check in {CheckName.ANNOTATION_DIVERGENCE, CheckName.SCOPE_ESCAPE}:
+        return capabilities.server_filesystem
+    return capabilities.server_egress
 
 
 def _observable_probe_count(
@@ -365,10 +389,13 @@ def _observable_probe_count(
         CheckName.SCOPE_ESCAPE,
     } and not capabilities.server_filesystem:
         return 0
-    if check in {
-        CheckName.UNDECLARED_EGRESS,
-        CheckName.CANARY_EXFILTRATION,
-    } and not capabilities.server_egress:
+    if check == CheckName.CANARY_EXFILTRATION:
+        if not (capabilities.server_egress or capabilities.tool_results):
+            return 0
+        if capabilities.tool_results and not capabilities.server_egress:
+            # Every successful probe's result was scanned for planted values.
+            return len(successful_probe_ids)
+    elif check == CheckName.UNDECLARED_EGRESS and not capabilities.server_egress:
         return 0
     return sum(
         check in heartbeat_checks_by_probe.get((tool, probe_id), set())

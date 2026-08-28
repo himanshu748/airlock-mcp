@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
@@ -22,7 +22,7 @@ from .fixtures import (
     create_dishonest_server,
     create_honest_server,
 )
-from .models import EvidenceMode, ObservationCapabilities
+from .models import EvidenceMode, ObservationCapabilities, TargetBinding
 from .proxy import create_proxy_router
 from .store import CaseIntegrityError, JsonCaseStore
 
@@ -70,7 +70,9 @@ def create_app(
     *,
     case_root: Path | str,
     public_base_url: str,
-    upstream_client: httpx.AsyncClient | None = None,
+    upstream_transport_factory: (
+        Callable[[TargetBinding], httpx.BaseTransport] | None
+    ) = None,
     proxy_upstream_headers: Mapping[str, str] | None = None,
     authenticated_target_urls: Sequence[str] | None = None,
     control_allowed_hosts: Sequence[str] | None = None,
@@ -98,6 +100,7 @@ def create_app(
     max_catalog_bytes: int = 2 * 1024 * 1024,
     max_audit_response_bytes: int = 4 * 1024 * 1024,
     audit_operation_timeout_seconds: float = 60.0,
+    audit_total_timeout_seconds: float = 240.0,
     probe_planning_timeout_seconds: float = 5.0,
     probe_planning_memory_bytes: int = 512 * 1024 * 1024,
     max_runtime_events: int = 2_000,
@@ -155,6 +158,7 @@ def create_app(
         max_catalog_bytes=max_catalog_bytes,
         max_audit_response_bytes=max_audit_response_bytes,
         audit_operation_timeout_seconds=audit_operation_timeout_seconds,
+        audit_total_timeout_seconds=audit_total_timeout_seconds,
         probe_planning_timeout_seconds=probe_planning_timeout_seconds,
         probe_planning_memory_bytes=probe_planning_memory_bytes,
     )
@@ -188,6 +192,11 @@ def create_app(
         audit_executor=audit_executor,
         observation_capabilities_by_mode=configured_observation_modes,
         observation_target_urls_by_mode=configured_observation_targets,
+        proxy_authorization=(
+            f"Bearer {case_proxy_bearer_token}"
+            if case_proxy_bearer_token is not None
+            else None
+        ),
     )
     transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
@@ -257,7 +266,7 @@ def create_app(
                 transport_security=transport_security,
             )
         )
-    proxy_upstream = upstream_client
+    proxy_upstream_transport_factory = upstream_transport_factory
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -302,13 +311,15 @@ def create_app(
     app.state.case_service = case_service
     app.state.audit_executor = audit_executor
     app.state.control_server = control_server
-    app.state.proxy_upstream_client = proxy_upstream
+    app.state.proxy_upstream_transport_factory = (
+        proxy_upstream_transport_factory
+    )
     app.state.honest_fixture_server = honest_fixture_server
     app.state.dishonest_fixture_server = dishonest_fixture_server
     app.include_router(
         create_proxy_router(
             store,
-            upstream_client=proxy_upstream,
+            upstream_transport_factory=proxy_upstream_transport_factory,
             upstream_headers=proxy_upstream_headers,
             credential_target_urls=normalized_authenticated_targets or None,
             target_resolver=target_resolver,

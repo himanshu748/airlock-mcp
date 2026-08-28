@@ -20,7 +20,13 @@ from mcp.shared.inbound import (
 )
 
 from .auth_context import fingerprint_auth_context
-from .models import CaseStatus, EvidenceEvent, EventKind, ToolDeclaration
+from .models import (
+    CaseStatus,
+    EvidenceEvent,
+    EventKind,
+    TargetBinding,
+    ToolDeclaration,
+)
 from .pinned_transport import create_pinned_httpx_transport
 from .store import CaseIntegrityError, JsonCaseStore
 from .target_policy import TargetValidationError, validate_target_url
@@ -58,6 +64,10 @@ _MCP_RESPONSE_HEADERS = {
 
 _ALLOWED_RUNTIME_METHODS = frozenset(
     {
+        # A modern client negotiates with server/discover before initialize.
+        # Without it no real MCP client can complete a handshake through the
+        # proxy at all. It is a read-only capability probe.
+        "server/discover",
         "initialize",
         "notifications/cancelled",
         "notifications/initialized",
@@ -156,7 +166,9 @@ def _forward_response_headers(response: httpx.Response) -> dict[str, str]:
 def create_proxy_router(
     store: JsonCaseStore,
     *,
-    upstream_client: httpx.AsyncClient | None = None,
+    upstream_transport_factory: (
+        Callable[[TargetBinding], httpx.BaseTransport] | None
+    ) = None,
     upstream_headers: Mapping[str, str] | None = None,
     credential_target_urls: Iterable[str] | None = None,
     target_resolver: Callable[[str], Iterable[str]] = _system_resolver,
@@ -180,6 +192,9 @@ def create_proxy_router(
     }.items():
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
             raise ValueError(f"{name} must be a positive number")
+    build_upstream_transport = (
+        upstream_transport_factory or create_pinned_httpx_transport
+    )
     configured_upstream_headers = dict(upstream_headers or {})
     configured_credential_targets = frozenset(credential_target_urls or [])
     if configured_upstream_headers and not configured_credential_targets:
@@ -367,6 +382,18 @@ def create_proxy_router(
                     },
                     status_code=400,
                 )
+            # The runtime client's protocol version will not equal the one
+            # Airlock audited under: the harness pins its own client version
+            # and Airlock pins the version its audit client negotiated. The
+            # observed pair here is TrueForge at 2025-11-25 against an audit at
+            # 2026-07-28. Refusing on that difference makes the proxy unusable
+            # with the harness it exists to serve, and it is not the control
+            # that matters. The catalog-change check below compares the live
+            # advertised surface, names, descriptions, schemas and annotations,
+            # against the inventoried one and refuses on any deviation, which
+            # is what catches a surface that differs under another version.
+            # The mismatch is recorded as evidence so a human sees it.
+            supplied_protocol = request.headers.get("mcp-protocol-version")
             routing_headers_present = any(
                 request.headers.get(name) is not None
                 for name in ("mcp-method", "mcp-name")
@@ -601,6 +628,26 @@ def create_proxy_router(
                 default=str,
             ).encode("utf-8")
             runtime_probe_id = f"runtime_{uuid4().hex}"
+            if (
+                supplied_protocol is not None
+                and case.protocol_version is not None
+                and supplied_protocol != case.protocol_version
+            ):
+                store.append_runtime_event(
+                    case_id,
+                    EvidenceEvent(
+                        event_id=f"ev_{uuid4().hex}",
+                        probe_id=runtime_probe_id,
+                        tool=tool_name,
+                        kind=EventKind.PROTOCOL_VERSION_DRIFT,
+                        sensor="mcp_transcript",
+                        details={
+                            "audited_protocol_version": case.protocol_version,
+                            "runtime_protocol_version": supplied_protocol,
+                        },
+                    ),
+                    max_runtime_events=max_runtime_events,
+                )
             store.append_runtime_event(
                 case_id,
                 EvidenceEvent(
@@ -618,9 +665,13 @@ def create_proxy_router(
                 max_runtime_events=max_runtime_events,
             )
 
-        owns_request_client = upstream_client is None
-        request_client = upstream_client or httpx.AsyncClient(
-            transport=create_pinned_httpx_transport(binding),
+        # The transport is built per request from the binding this case
+        # validated. Injection replaces the transport, never the client, so a
+        # caller cannot substitute one that skips DNS pinning and reaches an
+        # address outside the validated binding.
+        owns_request_client = True
+        request_client = httpx.AsyncClient(
+            transport=build_upstream_transport(binding),
             follow_redirects=False,
             trust_env=False,
             timeout=httpx.Timeout(

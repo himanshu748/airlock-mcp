@@ -164,6 +164,11 @@ def create_app_from_env(
             "AIRLOCK_AUDIT_OPERATION_TIMEOUT_SECONDS",
             default=60,
         ),
+        audit_total_timeout_seconds=_positive_integer(
+            values,
+            "AIRLOCK_AUDIT_TOTAL_TIMEOUT_SECONDS",
+            default=240,
+        ),
         probe_planning_timeout_seconds=_positive_integer(
             values,
             "AIRLOCK_PROBE_PLANNING_TIMEOUT_SECONDS",
