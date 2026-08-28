@@ -2,13 +2,14 @@ import Link from "next/link";
 import { SiteNav } from "@/components/SiteNav";
 import { Section } from "@/components/Section";
 import { DivergenceCard } from "@/components/DivergenceCard";
+import { RunProof } from "@/components/RunProof";
 import { DISCLAIMER } from "./Disclaimer";
 
 const STATS = [
   ["5 of 5", "planted behaviours detected in the dishonest fixture"],
   ["0", "findings on the honest fixture, across 36 checks"],
   ["6", "detections, each reported as a verdict and never a score"],
-  ["11", "probes to audit a six-tool server end to end"],
+  ["24", "probes to audit a six-tool server end to end"],
 ];
 
 const STEPS = [
@@ -220,6 +221,16 @@ export default function LandingPage() {
             </li>
           ))}
         </ol>
+      </Section>
+
+      {/* Proof */}
+      <Section
+        id="run"
+        eyebrow="See it run"
+        title="One command, against a server that lies on purpose."
+        lede="The repository ships two owned fixtures with the same six-tool shape. One declares itself accurately. The other plants five behaviours behind honest-looking annotations. This is the real output of auditing the second one."
+      >
+        <RunProof />
       </Section>
 
       {/* Checks */}

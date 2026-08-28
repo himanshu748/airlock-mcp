@@ -9,7 +9,7 @@ export function DivergenceCard() {
           case af_5384c433 · acme-docs.example
         </span>
         <span className="font-mono text-[12px] text-pencil">
-          transcript only · 11 probes
+          controlled fixture · 24 probes
         </span>
       </div>
 

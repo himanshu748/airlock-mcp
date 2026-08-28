@@ -3,6 +3,7 @@ import Link from "next/link";
 const LINKS = [
   ["The gap", "#gap"],
   ["How it works", "#how"],
+  ["See it run", "#run"],
   ["Checks", "#checks"],
   ["Output", "#output"],
 ];
