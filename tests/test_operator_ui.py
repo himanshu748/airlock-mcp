@@ -96,11 +96,19 @@ def test_the_ui_verdict_rule_matches_the_backend_approval_rule():
 
 
 def test_the_export_is_pinned_to_the_route_the_backend_mounts():
+    # The hosted build serves the same export from a root, so the base path is
+    # configurable. What must not drift is the default, because the backend
+    # mounts the export at /ui and a different default would serve a page whose
+    # asset URLs all miss.
     config = (FRONTEND / "next.config.ts").read_text(encoding="utf-8")
 
     assert 'output: "export"' in config
-    assert 'basePath: "/ui"' in config
+    assert 'process.env.AIRLOCK_UI_BASE_PATH ?? "/ui"' in config
     assert "trailingSlash: true" in config
+
+    # The mount the default has to agree with.
+    app = (ROOT / "airlock" / "app.py").read_text(encoding="utf-8")
+    assert '"/ui"' in app
 
 
 def test_an_unaudited_tool_is_never_stamped_cleared():
