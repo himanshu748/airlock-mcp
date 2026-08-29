@@ -4,6 +4,7 @@ const LINKS = [
   ["The gap", "#gap"],
   ["How it works", "#how"],
   ["See it run", "#run"],
+  ["Real servers", "#real"],
   ["Checks", "#checks"],
   ["Output", "#output"],
 ];
