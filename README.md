@@ -21,10 +21,15 @@ the evidence, then decide. The agent spec is
 [`skills/airlock-audit/SKILL.md`](skills/airlock-audit/SKILL.md).
 
 The spec names `probe_tool`, `seal_case` and `emit_policy` literally in
-`require_approval_for_tools`, because those three publish sensitive annotations
-and must never resolve from a server's own hints. A test asserts that every
-side-effecting control tool is gated, so the harness cannot quietly lose an
-approval card:
+`require_approval_for_tools`, because those three are the control tools
+annotated destructive: they exercise a live server, seal a case or publish a
+policy. `open_case` and `list_declared_tools` change state too but are not
+gated, because neither touches the audited server or emits anything.
+
+The gate is not a hand-copied list. One map in `airlock/control.py` carries
+every control tool's annotations, a test asserts that map matches the tools the
+server actually registers, and a second asserts every destructive one appears in
+the spec. Add a destructive tool without gating it and the suite fails:
 
 ```bash
 .venv/bin/python -m pytest tests/test_config.py -q
@@ -508,7 +513,7 @@ in hand.
 .venv/bin/python -m pytest -q
 ```
 
-294 tests covering domain invariants, evidence persistence, schema-driven
+299 tests covering domain invariants, evidence persistence, schema-driven
 probes, all detector outcomes, honest and dishonest fixtures, the control MCP,
 target validation, DNS pinning, modern and legacy MCP proxy routing, streamed
 responses, enforcement, policy emission, stdio target resolution and

@@ -76,6 +76,18 @@ _SENSITIVE_STATEFUL = ToolAnnotations(
     idempotent_hint=False,
     open_world_hint=False,
 )
+# The agent spec has to gate every destructive control tool, and a hand-copied
+# list in a test would drift the first time a tool is added. This is the one
+# place both the decorators and that check read from.
+CONTROL_TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
+    "open_case": _REMOTE_STATEFUL,
+    "list_declared_tools": _REMOTE_STATEFUL,
+    "probe_tool": _SENSITIVE_REMOTE,
+    "read_evidence": _READ_ONLY,
+    "seal_case": _SENSITIVE_STATEFUL,
+    "emit_policy": _SENSITIVE_STATEFUL,
+}
+
 _CONNECTOR_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SAFE_ANNOTATION_KEYS = {
     "readOnlyHint",
