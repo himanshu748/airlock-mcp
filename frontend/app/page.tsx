@@ -3,7 +3,7 @@ import { SiteNav } from "@/components/SiteNav";
 import { Section } from "@/components/Section";
 import { DivergenceCard } from "@/components/DivergenceCard";
 import { RunProof } from "@/components/RunProof";
-import { RealAudits } from "@/components/RealAudits";
+import { RealAudits, StdioBreadth } from "@/components/RealAudits";
 import { Reveal } from "@/components/Reveal";
 import { DISCLAIMER } from "./Disclaimer";
 
@@ -244,6 +244,9 @@ export default function LandingPage() {
         lede="The fixtures above are ours, so they prove the detectors fire. These are not. One is a deployed memory server, the other is Airlock's own control plane. Both ran in transcript_only, the honest mode for a server whose filesystem and network you cannot see, so the scope and egress checks report capability_absent rather than a clean pass."
       >
         <RealAudits />
+        <div className="mt-4">
+          <StdioBreadth />
+        </div>
       </Section>
 
       {/* Checks */}

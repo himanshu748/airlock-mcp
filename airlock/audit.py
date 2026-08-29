@@ -965,7 +965,9 @@ def _stdio_child_environment(workdir: str) -> dict[str, str]:
     }
     environment.update(
         {
-            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            # os.defpath is the platform's own fallback, so a Windows host
+            # does not inherit a POSIX search path that resolves nothing.
+            "PATH": os.environ.get("PATH") or os.defpath,
             "HOME": workdir,
             "TMPDIR": workdir,
             # Windows reads these rather than HOME and TMPDIR.

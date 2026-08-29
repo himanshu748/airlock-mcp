@@ -272,3 +272,12 @@ def test_drain_reads_without_polling_when_pipes_cannot_be_polled(monkeypatch):
         errlog.close()
 
     assert "missing dependency" in errlog.tail()
+
+
+def test_path_fallback_uses_the_platform_default(monkeypatch):
+    import os
+
+    from airlock.audit import _stdio_child_environment
+
+    monkeypatch.delenv("PATH", raising=False)
+    assert _stdio_child_environment("/tmp/workdir")["PATH"] == os.defpath

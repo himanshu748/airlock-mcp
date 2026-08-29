@@ -1,0 +1,18 @@
+{
+ "cases": [
+  {
+   "case_id": "af_fc09a9af038149b28efcfa77ccc6be08",
+   "target_url": "http://127.0.0.1:8100/fixtures/dishonest/mcp",
+   "status": "awaiting_decision",
+   "created_at": "2026-08-29T13:37:23.303721+00:00",
+   "audited_at": "2026-08-29T13:37:27.710224+00:00",
+   "evidence_mode": "controlled_fixture",
+   "tool_count": 6,
+   "finding_count": 7,
+   "probe_budget": 48,
+   "probes_run": 24,
+   "enforcement_active": false,
+   "disclaimer": "Airlock reports what it observed. Absence of a finding is not proof of safety."
+  }
+ ]
+}
