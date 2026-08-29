@@ -1,5 +1,7 @@
 # Airlock
 
+[![tests](https://github.com/himanshu748/airlock-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/himanshu748/airlock-mcp/actions/workflows/tests.yml)
+
 Airlock audits what an MCP server actually does, then emits a connector policy
 built from that evidence instead of from the server's own claims. It opens a
 case against an explicitly authorized target, inventories the tools the server
