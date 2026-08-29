@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import socket
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 
 from .approval import minimum_approval_tools
@@ -20,6 +20,10 @@ from .models import (
     ToolDeclaration,
 )
 from .store import JsonCaseStore
+from .stdio_targets import (
+    is_stdio_target,
+    resolve_stdio_target,
+)
 from .target_policy import TargetValidationError, validate_target_url
 
 
@@ -46,6 +50,7 @@ class CaseService:
         allow_local_targets: bool = False,
         allowed_target_hostnames: Iterable[str] | None = None,
         credential_target_urls: Iterable[str] | None = None,
+        stdio_targets: Mapping[str, StdioTarget] | None = None,
     ) -> None:
         self.store = store
         self.public_base_url = public_base_url.rstrip("/")
@@ -57,6 +62,7 @@ class CaseService:
             if credential_target_urls is not None
             else None
         )
+        self.stdio_targets = dict(stdio_targets or {})
 
     def open_case(
         self,
@@ -66,6 +72,13 @@ class CaseService:
         evidence_mode: EvidenceMode,
         capabilities: ObservationCapabilities,
     ) -> CaseRecord:
+        if is_stdio_target(target_url):
+            return self._open_stdio_case(
+                target_url=target_url,
+                declared_scope=declared_scope,
+                evidence_mode=evidence_mode,
+                capabilities=capabilities,
+            )
         self._require_credential_target_scope(target_url)
         validated = validate_target_url(
             target_url,
@@ -95,8 +108,43 @@ class CaseService:
         self.store.save_case(case)
         return case
 
-    def revalidate_target(self, case_id: str) -> TargetBinding:
+    def _open_stdio_case(
+        self,
+        *,
+        target_url: str,
+        declared_scope: DeclaredScope,
+        evidence_mode: EvidenceMode,
+        capabilities: ObservationCapabilities,
+    ) -> CaseRecord:
+        """Open a case against a command the operator authorized.
+
+        There is no URL to validate and no DNS answer to pin. What replaces
+        both is that the command is never supplied here: the case names a
+        target and the deployment supplies the argument vector.
+        """
+
+        stdio_target = resolve_stdio_target(target_url, self.stdio_targets)
+        case = self.store.create_case(
+            target_url=target_url,
+            declared_scope=declared_scope,
+            observation_capabilities=capabilities,
+            evidence_mode=evidence_mode,
+            stdio_target=stdio_target,
+        )
+        # No proxy_url: the enforcing proxy forwards to an HTTP upstream, and a
+        # launched process has none. Policy emission refuses the case for that
+        # reason rather than pretending an enforcement path exists.
+        self.store.save_case(case)
+        return case
+
+    def revalidate_target(self, case_id: str) -> TargetBinding | None:
         case = self.store.load_case(case_id)
+        if case.stdio_target is not None:
+            # A launched process has no DNS answer to drift. The command is
+            # revalidated against operator configuration instead, so a target
+            # removed from the deployment stops working immediately.
+            resolve_stdio_target(case.target_url, self.stdio_targets)
+            return None
         self._require_credential_target_scope(case.target_url)
         if case.target_binding is None:
             raise TargetValidationError("case has no validated target binding")

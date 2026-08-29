@@ -171,6 +171,36 @@ Each tool and check resolves to one aggregate state: `finding`,
 `no_finding_observed`, `not_tested` or `sensor_failed`. Finding severity is
 expressed separately as `block`, `critical` or `suspicious`.
 
+## Auditing stdio servers
+
+Most MCP servers ship as a command rather than a URL. Airlock can audit those
+too, but launching one means executing the code the audit exists to distrust, so
+the command never comes from the model or from a case argument.
+
+The operator writes a fixed table of named commands. A case selects a name.
+
+```bash
+export AIRLOCK_STDIO_TARGETS='memory=npx -y @modelcontextprotocol/server-memory;git=uvx mcp-server-git --repository /tmp/sandbox'
+```
+
+Then open a case against `stdio:memory`. Names are looked up, never parsed into
+commands, so there is no path from a server, a tool result or a model-supplied
+string to an argument vector. The child runs in a throwaway working directory
+with `HOME` and `TMPDIR` pointed at it and no inherited environment beyond
+`PATH`.
+
+Two limits are deliberate:
+
+- **Audit only.** The enforcing proxy forwards to an HTTP upstream, and a
+  launched process has none. `emit_policy` refuses a stdio case rather than
+  emitting a connector nothing can hold.
+- **No DNS pinning, because there is no DNS.** What replaces it is that the
+  command is revalidated against operator configuration before each connection,
+  so a target removed from the deployment stops working immediately.
+
+Process isolation beyond the working directory and environment is the
+deployment's job. Airlock does not sandbox the child's filesystem or network.
+
 ## Production settings
 
 The demo above is a loopback development configuration. For a real deployment:

@@ -4,7 +4,9 @@ import asyncio
 import hashlib
 import json
 import multiprocessing
+import os
 import sys
+import tempfile
 from contextlib import asynccontextmanager
 from collections.abc import Mapping
 from typing import Any
@@ -12,6 +14,7 @@ from uuid import uuid4
 
 import httpx2
 from mcp import Client
+from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from .auth_context import ANONYMOUS_AUTH_CONTEXT, fingerprint_auth_context
@@ -32,6 +35,7 @@ from .models import (
     EvidenceEvent,
     EventKind,
     ProbeRecord,
+    StdioTarget,
     TargetBinding,
     ToolDeclaration,
 )
@@ -137,6 +141,7 @@ class AuditExecutor:
             async with _open_client_with_timeout(
                 target_reference,
                 binding=case.target_binding if target is None else None,
+                stdio_target=case.stdio_target if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
                 deadline=inventory_deadline,
@@ -253,6 +258,7 @@ class AuditExecutor:
             async with _open_client_with_timeout(
                 target_reference,
                 binding=case.target_binding if target is None else None,
+                stdio_target=case.stdio_target if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
                 deadline=audit_deadline,
@@ -380,6 +386,7 @@ class AuditExecutor:
             async with _open_client_with_timeout(
                 target_reference,
                 binding=case.target_binding if target is None else None,
+                stdio_target=case.stdio_target if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
                 deadline=audit_deadline,
@@ -886,6 +893,7 @@ async def _open_client_with_timeout(
     timeout_seconds: float,
     deadline: float | None = None,
     binding: TargetBinding | None = None,
+    stdio_target: StdioTarget | None = None,
     headers: Mapping[str, str] | None = None,
     max_response_bytes: int = 4 * 1024 * 1024,
 ):
@@ -903,6 +911,7 @@ async def _open_client_with_timeout(
     manager = _open_client(
         target,
         binding=binding,
+        stdio_target=stdio_target,
         headers=headers,
         max_response_bytes=max_response_bytes,
     )
@@ -923,13 +932,43 @@ async def _open_client_with_timeout(
 
 
 @asynccontextmanager
+async def _open_stdio_client(stdio_target: StdioTarget):
+    with tempfile.TemporaryDirectory(prefix="airlock-stdio-") as workdir:
+        parameters = StdioServerParameters(
+            command=stdio_target.command,
+            args=list(stdio_target.args),
+            env={
+                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "HOME": workdir,
+                "TMPDIR": workdir,
+            },
+            cwd=workdir,
+        )
+        with open(os.devnull, "w", encoding="utf-8") as errlog:
+            async with Client(
+                stdio_client(parameters, errlog=errlog),
+                mode="auto",
+            ) as client:
+                yield client
+
+
+@asynccontextmanager
 async def _open_client(
     target: Any,
     *,
     binding: TargetBinding | None = None,
+    stdio_target: StdioTarget | None = None,
     headers: Mapping[str, str] | None = None,
     max_response_bytes: int = 4 * 1024 * 1024,
 ):
+    if stdio_target is not None:
+        # Launching the audited server is the one place Airlock executes the
+        # thing it distrusts. The command comes from deployment configuration,
+        # the environment is not inherited, and the working directory is a
+        # throwaway the caller owns.
+        async with _open_stdio_client(stdio_target) as client:
+            yield client
+        return
     if isinstance(target, str):
         if binding is None:
             raise ValueError("URL targets require a validated target binding")

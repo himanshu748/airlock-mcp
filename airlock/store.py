@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from .models import (
+    StdioTarget,
     CaseRecord,
     CaseStatus,
     DeclaredScope,
@@ -72,6 +73,7 @@ class JsonCaseStore:
         evidence_mode: EvidenceMode = EvidenceMode.TRANSCRIPT_ONLY,
         proxy_url: str | None = None,
         target_binding: TargetBinding | None = None,
+        stdio_target: StdioTarget | None = None,
     ) -> CaseRecord:
         record = CaseRecord.new(
             case_id=f"af_{uuid4().hex}",
@@ -81,6 +83,7 @@ class JsonCaseStore:
             evidence_mode=evidence_mode,
             proxy_url=proxy_url,
             target_binding=target_binding,
+            stdio_target=stdio_target,
         )
         self.save_case(record)
         return record

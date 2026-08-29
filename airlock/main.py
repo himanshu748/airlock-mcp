@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from .app import create_app
+from .stdio_targets import parse_stdio_targets
 
 
 def _boolean(
@@ -137,6 +138,7 @@ def create_app_from_env(
         if target_authorization is not None
         else None
     )
+    stdio_targets = parse_stdio_targets(values.get("AIRLOCK_STDIO_TARGETS"))
     fixture_root = values.get("AIRLOCK_FIXTURE_ROOT")
     return create_app(
         case_root=case_root,
@@ -148,6 +150,7 @@ def create_app_from_env(
         ),
         control_allowed_hosts=_csv(values, "AIRLOCK_CONTROL_ALLOWED_HOSTS"),
         control_allowed_origins=_csv(values, "AIRLOCK_CONTROL_ALLOWED_ORIGINS"),
+        stdio_targets=stdio_targets,
         control_bearer_token=control_token,
         case_proxy_bearer_token=runtime_token,
         fixture_bearer_token=values.get("AIRLOCK_FIXTURE_BEARER_TOKEN"),
