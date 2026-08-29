@@ -52,6 +52,18 @@ _EXPECTED_CANARY_LABELS = ("document_secret",)
 _TEARDOWN_GRACE_SECONDS = 5.0
 
 
+class StdioLaunchError(RuntimeError):
+    """A stdio server failed, carrying the tail of what it printed to stderr."""
+
+    def __init__(self, stdio_target: StdioTarget, stderr_tail: str) -> None:
+        detail = f": {stderr_tail}" if stderr_tail else ""
+        super().__init__(
+            f"stdio target {stdio_target.name} failed{detail}"
+        )
+        self.stdio_target = stdio_target
+        self.stderr_tail = stderr_tail
+
+
 class AuditExecutor:
     def __init__(
         self,
@@ -931,25 +943,67 @@ async def _open_client_with_timeout(
         )
 
 
+# The SDK merges the supplied env over get_default_environment(), which
+# inherits HOME, LOGNAME, PATH, SHELL, TERM and USER from the host. Naming
+# every one of them makes the child's environment ours rather than whatever
+# the SDK decided to pass through.
+_STDIO_INHERITED_ENV_VARS = ("HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER")
+_STDIO_STDERR_CAPTURE_BYTES = 8 * 1024
+
+
+def _stdio_child_environment(workdir: str) -> dict[str, str]:
+    environment = {
+        name: "" for name in _STDIO_INHERITED_ENV_VARS
+    }
+    environment.update(
+        {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": workdir,
+            "TMPDIR": workdir,
+            # Windows reads these rather than HOME and TMPDIR.
+            "USERPROFILE": workdir,
+            "TEMP": workdir,
+            "TMP": workdir,
+        }
+    )
+    return environment
+
+
 @asynccontextmanager
 async def _open_stdio_client(stdio_target: StdioTarget):
     with tempfile.TemporaryDirectory(prefix="airlock-stdio-") as workdir:
         parameters = StdioServerParameters(
             command=stdio_target.command,
             args=list(stdio_target.args),
-            env={
-                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-                "HOME": workdir,
-                "TMPDIR": workdir,
-            },
+            env=_stdio_child_environment(workdir),
             cwd=workdir,
         )
-        with open(os.devnull, "w", encoding="utf-8") as errlog:
-            async with Client(
-                stdio_client(parameters, errlog=errlog),
-                mode="auto",
-            ) as client:
-                yield client
+        # A server that fails to start says why on stderr. Discarding it left
+        # an operator with a bare transport failure and nothing to act on, so
+        # a bounded tail is kept and surfaced on the exception.
+        stderr_path = os.path.join(workdir, "airlock-stdio-stderr.log")
+        with open(stderr_path, "w+", encoding="utf-8", errors="replace") as errlog:
+            try:
+                async with Client(
+                    stdio_client(parameters, errlog=errlog),
+                    mode="auto",
+                ) as client:
+                    yield client
+            except Exception as exc:
+                raise StdioLaunchError(
+                    stdio_target,
+                    _read_stderr_tail(errlog),
+                ) from exc
+
+
+def _read_stderr_tail(errlog: Any) -> str:
+    try:
+        errlog.flush()
+        errlog.seek(0)
+        captured = errlog.read()
+    except (OSError, ValueError):
+        return ""
+    return captured[-_STDIO_STDERR_CAPTURE_BYTES:].strip()
 
 
 @asynccontextmanager

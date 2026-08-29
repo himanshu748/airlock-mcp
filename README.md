@@ -185,18 +185,27 @@ export AIRLOCK_STDIO_TARGETS='memory=npx -y @modelcontextprotocol/server-memory;
 
 Then open a case against `stdio:memory`. Names are looked up, never parsed into
 commands, so there is no path from a server, a tool result or a model-supplied
-string to an argument vector. The child runs in a throwaway working directory
-with `HOME` and `TMPDIR` pointed at it and no inherited environment beyond
-`PATH`.
+string to an argument vector.
 
-Two limits are deliberate:
+The child runs in a throwaway working directory. The MCP SDK merges the
+supplied environment over a default that inherits `HOME`, `LOGNAME`, `PATH`,
+`SHELL`, `TERM` and `USER` from the host, so Airlock names every one of them:
+`PATH` is passed through, the home and temporary directories point at the
+throwaway, and the rest are emptied.
+
+Three limits are deliberate:
 
 - **Audit only.** The enforcing proxy forwards to an HTTP upstream, and a
   launched process has none. `emit_policy` refuses a stdio case rather than
   emitting a connector nothing can hold.
-- **No DNS pinning, because there is no DNS.** What replaces it is that the
-  command is revalidated against operator configuration before each connection,
-  so a target removed from the deployment stops working immediately.
+- **No DNS pinning, because there is no DNS.** The whole command binding is
+  compared against operator configuration before each connection, so
+  re-pointing a name, or removing and re-adding it, revokes the open case
+  rather than letting it keep running the withdrawn command.
+- **`AIRLOCK_MAX_AUDIT_RESPONSE_BYTES` does not apply.** That cap is enforced
+  by the HTTP transport, and the stdio transport is the SDK's. A launched
+  server can return a response large enough to exhaust the auditor's memory
+  before Airlock sees it. The audit deadline still bounds the run.
 
 Process isolation beyond the working directory and environment is the
 deployment's job. Airlock does not sandbox the child's filesystem or network.

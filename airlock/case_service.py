@@ -140,10 +140,19 @@ class CaseService:
     def revalidate_target(self, case_id: str) -> TargetBinding | None:
         case = self.store.load_case(case_id)
         if case.stdio_target is not None:
-            # A launched process has no DNS answer to drift. The command is
-            # revalidated against operator configuration instead, so a target
-            # removed from the deployment stops working immediately.
-            resolve_stdio_target(case.target_url, self.stdio_targets)
+            # A launched process has no DNS answer to drift, so what drifts
+            # instead is the command behind the name. Comparing the whole
+            # binding means re-pointing a name, or removing and re-adding it,
+            # revokes the old case rather than letting it keep executing the
+            # command the operator withdrew.
+            current = resolve_stdio_target(case.target_url, self.stdio_targets)
+            if (
+                current.command != case.stdio_target.command
+                or list(current.args) != list(case.stdio_target.args)
+            ):
+                raise TargetValidationError(
+                    "stdio target command changed after case creation"
+                )
             return None
         self._require_credential_target_scope(case.target_url)
         if case.target_binding is None:

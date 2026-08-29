@@ -102,3 +102,85 @@ def test_stdio_case_is_audit_only_and_emits_no_policy(tmp_path):
 
     with pytest.raises(PolicyInvariantError, match="audit-only"):
         compile_policy(case, connector_name="memory")
+
+
+def _service(tmp_path, config):
+    from airlock.case_service import CaseService
+    from airlock.store import JsonCaseStore
+
+    return CaseService(
+        JsonCaseStore(tmp_path),
+        public_base_url="http://127.0.0.1:8000",
+        stdio_targets=parse_stdio_targets(config),
+    )
+
+
+def _open(service):
+    from airlock.models import (
+        DeclaredScope,
+        EvidenceMode,
+        ObservationCapabilities,
+    )
+
+    return service.open_case(
+        target_url="stdio:memory",
+        declared_scope=DeclaredScope(),
+        evidence_mode=EvidenceMode.TRANSCRIPT_ONLY,
+        capabilities=ObservationCapabilities(
+            mcp_traffic=True,
+            tool_results=True,
+            server_egress=False,
+            server_filesystem=False,
+        ),
+    )
+
+
+def test_repointing_a_name_revokes_the_open_case(tmp_path):
+    from airlock.target_policy import TargetValidationError
+
+    service = _service(tmp_path, "memory=npx -y server-memory")
+    case = _open(service)
+    service.revalidate_target(case.case_id)
+
+    # The operator points the same name at a different command.
+    service.stdio_targets = parse_stdio_targets("memory=npx -y something-else")
+    with pytest.raises(TargetValidationError, match="command changed"):
+        service.revalidate_target(case.case_id)
+
+
+def test_changing_arguments_under_the_same_name_revokes_the_case(tmp_path):
+    from airlock.target_policy import TargetValidationError
+
+    service = _service(tmp_path, "memory=npx -y server-memory")
+    case = _open(service)
+
+    service.stdio_targets = parse_stdio_targets(
+        "memory=npx -y server-memory --allow-write /"
+    )
+    with pytest.raises(TargetValidationError, match="command changed"):
+        service.revalidate_target(case.case_id)
+
+
+def test_removing_the_target_revokes_the_case(tmp_path):
+    service = _service(tmp_path, "memory=npx -y server-memory")
+    case = _open(service)
+
+    service.stdio_targets = {}
+    with pytest.raises(StdioTargetError):
+        service.revalidate_target(case.case_id)
+
+
+def test_child_environment_is_ours_not_the_sdk_default():
+    from airlock.audit import _STDIO_INHERITED_ENV_VARS, _stdio_child_environment
+
+    environment = _stdio_child_environment("/tmp/workdir")
+    # Every variable the SDK would otherwise inherit is named here, so the
+    # child cannot pick up the operator's shell, user or home.
+    for name in _STDIO_INHERITED_ENV_VARS:
+        assert name in environment
+    assert environment["HOME"] == "/tmp/workdir"
+    assert environment["TMPDIR"] == "/tmp/workdir"
+    assert environment["USERPROFILE"] == "/tmp/workdir"
+    assert environment["LOGNAME"] == ""
+    assert environment["SHELL"] == ""
+    assert environment["USER"] == ""
