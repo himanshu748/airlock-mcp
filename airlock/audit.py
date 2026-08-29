@@ -5,6 +5,7 @@ import hashlib
 import json
 import multiprocessing
 import os
+import select
 import threading
 import sys
 import tempfile
@@ -951,6 +952,8 @@ async def _open_client_with_timeout(
 # the SDK decided to pass through.
 _STDIO_INHERITED_ENV_VARS = ("HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER")
 _STDIO_STDERR_CAPTURE_BYTES = 8 * 1024
+# Teardown budget for the stderr drain, applied twice at most.
+_STDIO_DRAIN_GRACE_SECONDS = 0.5
 
 
 def _stdio_child_environment(workdir: str) -> dict[str, str]:
@@ -977,8 +980,11 @@ class _BoundedStderr:
     The SDK hands errlog straight to the subprocess as its stderr, so it has
     to be a real file descriptor. Writing that to a file would let a chatty or
     hostile server fill the disk, and never reading the pipe would let it block
-    once the buffer filled. A pipe drained by a thread into a bounded buffer
-    does neither.
+    once the buffer filled.
+
+    The drain stops on a flag rather than on end of file. A server that spawns
+    a descendant holding the same stderr never closes the pipe, so waiting for
+    EOF would leak this thread and its descriptor for the life of the process.
     """
 
     def __init__(self, limit: int = _STDIO_STDERR_CAPTURE_BYTES) -> None:
@@ -986,17 +992,24 @@ class _BoundedStderr:
         self._chunks: deque[bytes] = deque()
         self._size = 0
         self._lock = threading.Lock()
+        self._stop = threading.Event()
         self._read_fd, self._write_fd = os.pipe()
+        os.set_blocking(self._read_fd, False)
         self._writer = os.fdopen(self._write_fd, "wb", buffering=0)
         self._thread = threading.Thread(target=self._drain, daemon=True)
         self._thread.start()
 
     def _drain(self) -> None:
-        with os.fdopen(self._read_fd, "rb", buffering=0) as reader:
-            while True:
+        try:
+            while not self._stop.is_set():
+                ready, _, _ = select.select([self._read_fd], [], [], 0.1)
+                if not ready:
+                    continue
                 try:
-                    chunk = reader.read(4096)
-                except (OSError, ValueError):
+                    chunk = os.read(self._read_fd, 4096)
+                except BlockingIOError:
+                    continue
+                except OSError:
                     return
                 if not chunk:
                     return
@@ -1005,6 +1018,11 @@ class _BoundedStderr:
                     self._size += len(chunk)
                     while self._size > self._limit and len(self._chunks) > 1:
                         self._size -= len(self._chunks.popleft())
+        finally:
+            try:
+                os.close(self._read_fd)
+            except OSError:
+                pass
 
     @property
     def stream(self) -> Any:
@@ -1016,11 +1034,19 @@ class _BoundedStderr:
         return captured[-self._limit :].decode("utf-8", "replace").strip()
 
     def close(self) -> None:
+        # Close the writer first so the pipe can reach end of file, then give
+        # the drain a moment to take what is still buffered. Setting the flag
+        # straight away would discard exactly the tail worth keeping.
         try:
             self._writer.close()
         except OSError:
             pass
-        self._thread.join(timeout=1.0)
+        self._thread.join(timeout=_STDIO_DRAIN_GRACE_SECONDS)
+        if self._thread.is_alive():
+            # A descendant inherited stderr, so end of file never comes. The
+            # drain checks the flag every 100ms, so this returns promptly.
+            self._stop.set()
+            self._thread.join(timeout=_STDIO_DRAIN_GRACE_SECONDS)
 
 
 @asynccontextmanager

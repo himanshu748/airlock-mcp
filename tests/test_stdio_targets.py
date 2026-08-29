@@ -211,3 +211,41 @@ def test_stderr_tail_survives_a_server_that_says_nothing():
     errlog = _BoundedStderr()
     errlog.close()
     assert errlog.tail() == ""
+
+
+def test_drain_stops_even_when_a_descendant_holds_stderr():
+    """A grandchild inheriting stderr means the pipe never reaches EOF."""
+    import os
+    import subprocess
+    import threading
+    import time
+
+    from airlock.audit import _BoundedStderr
+
+    before = threading.active_count()
+    errlog = _BoundedStderr()
+    # A descendant that keeps the write end open well past our teardown.
+    holder = subprocess.Popen(
+        ["python3", "-c", "import time; time.sleep(30)"],
+        stderr=errlog.stream,
+    )
+    try:
+        errlog.stream.write(b"starting up\n")
+        errlog.stream.flush()
+        time.sleep(0.2)
+
+        started = time.monotonic()
+        errlog.close()
+        elapsed = time.monotonic() - started
+
+        # Waiting for EOF here would block until the descendant exited.
+        assert elapsed < 2.0
+        for _ in range(40):
+            if threading.active_count() <= before:
+                break
+            time.sleep(0.05)
+        assert threading.active_count() <= before
+        assert "starting up" in errlog.tail()
+    finally:
+        holder.kill()
+        holder.wait()
