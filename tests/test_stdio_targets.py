@@ -232,12 +232,20 @@ def test_stderr_capture_accepts_a_descriptor_above_select_ceiling(monkeypatch):
     import airlock.audit as audit
 
     fcntl = pytest.importorskip("fcntl")
+    resource = pytest.importorskip("resource")
+    soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft_limit != resource.RLIM_INFINITY and soft_limit <= 1024:
+        pytest.skip("runner cannot allocate a descriptor above FD_SETSIZE")
     real_pipe = os.pipe
 
     def high_descriptor_pipe():
         read_fd, write_fd = real_pipe()
         try:
-            high_read_fd = fcntl.fcntl(read_fd, fcntl.F_DUPFD, 1024)
+            try:
+                high_read_fd = fcntl.fcntl(read_fd, fcntl.F_DUPFD, 1024)
+            except OSError as exc:
+                os.close(write_fd)
+                pytest.skip(f"runner cannot allocate a high descriptor: {exc}")
         finally:
             os.close(read_fd)
         return high_read_fd, write_fd
@@ -253,6 +261,37 @@ def test_stderr_capture_accepts_a_descriptor_above_select_ceiling(monkeypatch):
         errlog.close()
 
     assert "high descriptor diagnostic" in errlog.tail()
+
+
+def test_selector_startup_failure_is_synchronous_and_closes_pipe(monkeypatch):
+    import os
+    import threading
+
+    import airlock.audit as audit
+
+    read_fd, write_fd = os.pipe()
+    selector_closed = False
+
+    class FailingSelector:
+        def register(self, *args):
+            raise OSError("selector registration failed")
+
+        def close(self):
+            nonlocal selector_closed
+            selector_closed = True
+
+    monkeypatch.setattr(audit.os, "pipe", lambda: (read_fd, write_fd))
+    monkeypatch.setattr(audit.selectors, "DefaultSelector", FailingSelector)
+
+    before = threading.active_count()
+    with pytest.raises(OSError, match="selector registration failed"):
+        audit._BoundedStderr()
+
+    assert selector_closed
+    assert threading.active_count() == before
+    for descriptor in (read_fd, write_fd):
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
 
 
 def test_drain_stops_even_when_a_descendant_holds_stderr():

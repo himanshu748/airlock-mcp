@@ -1021,18 +1021,49 @@ class _BoundedStderr:
         self._size = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._read_fd, self._write_fd = os.pipe()
-        os.set_blocking(self._read_fd, False)
-        self._writer = os.fdopen(self._write_fd, "wb", buffering=0)
+        selector = selectors.DefaultSelector()
+        read_fd = -1
+        write_fd = -1
+        try:
+            read_fd, write_fd = os.pipe()
+            os.set_blocking(read_fd, False)
+            selector.register(read_fd, selectors.EVENT_READ)
+            writer = os.fdopen(write_fd, "wb", buffering=0)
+        except BaseException:
+            selector.close()
+            for descriptor in (read_fd, write_fd):
+                if descriptor < 0:
+                    continue
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            raise
+        self._selector = selector
+        self._read_fd = read_fd
+        self._write_fd = write_fd
+        self._writer = writer
         self._thread = threading.Thread(target=self._drain, daemon=True)
-        self._thread.start()
+        try:
+            self._thread.start()
+        except BaseException:
+            try:
+                self._writer.close()
+            except OSError:
+                pass
+            try:
+                self._selector.close()
+            finally:
+                try:
+                    os.close(self._read_fd)
+                except OSError:
+                    pass
+            raise
 
     def _drain(self) -> None:
-        selector = selectors.DefaultSelector()
         try:
-            selector.register(self._read_fd, selectors.EVENT_READ)
             while not self._stop.is_set():
-                if not selector.select(timeout=0.1):
+                if not self._selector.select(timeout=0.1):
                     continue
                 try:
                     chunk = os.read(self._read_fd, 4096)
@@ -1048,7 +1079,7 @@ class _BoundedStderr:
                     while self._size > self._limit and len(self._chunks) > 1:
                         self._size -= len(self._chunks.popleft())
         finally:
-            selector.close()
+            self._selector.close()
             try:
                 os.close(self._read_fd)
             except OSError:
