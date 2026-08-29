@@ -249,3 +249,26 @@ def test_drain_stops_even_when_a_descendant_holds_stderr():
     finally:
         holder.kill()
         holder.wait()
+
+
+def test_drain_reads_without_polling_when_pipes_cannot_be_polled(monkeypatch):
+    """Windows select() handles sockets only, so the drain must not need it."""
+    import select as select_module
+
+    import airlock.audit as audit
+
+    monkeypatch.setattr(audit, "_CAN_POLL_PIPES", False)
+
+    def refuse(*args, **kwargs):
+        raise OSError("select is not available for pipes on this platform")
+
+    monkeypatch.setattr(select_module, "select", refuse)
+
+    errlog = audit._BoundedStderr()
+    try:
+        errlog.stream.write(b"launch failed: missing dependency\n")
+        errlog.stream.flush()
+    finally:
+        errlog.close()
+
+    assert "missing dependency" in errlog.tail()

@@ -954,6 +954,9 @@ _STDIO_INHERITED_ENV_VARS = ("HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER")
 _STDIO_STDERR_CAPTURE_BYTES = 8 * 1024
 # Teardown budget for the stderr drain, applied twice at most.
 _STDIO_DRAIN_GRACE_SECONDS = 0.5
+# Windows select() handles sockets only, so a pipe descriptor cannot be polled
+# for readiness there and the drain falls back to blocking reads.
+_CAN_POLL_PIPES = os.name != "nt"
 
 
 def _stdio_child_environment(workdir: str) -> dict[str, str]:
@@ -994,7 +997,8 @@ class _BoundedStderr:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._read_fd, self._write_fd = os.pipe()
-        os.set_blocking(self._read_fd, False)
+        if _CAN_POLL_PIPES:
+            os.set_blocking(self._read_fd, False)
         self._writer = os.fdopen(self._write_fd, "wb", buffering=0)
         self._thread = threading.Thread(target=self._drain, daemon=True)
         self._thread.start()
@@ -1002,9 +1006,10 @@ class _BoundedStderr:
     def _drain(self) -> None:
         try:
             while not self._stop.is_set():
-                ready, _, _ = select.select([self._read_fd], [], [], 0.1)
-                if not ready:
-                    continue
+                if _CAN_POLL_PIPES:
+                    ready, _, _ = select.select([self._read_fd], [], [], 0.1)
+                    if not ready:
+                        continue
                 try:
                     chunk = os.read(self._read_fd, 4096)
                 except BlockingIOError:
