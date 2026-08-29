@@ -17,11 +17,21 @@ npm run build
 
 Then copy `out/` over `airlock/ui/` in the repository and commit the result.
 
+The public hosted record is built at a root and selects its captured snapshot
+at build time:
+
+```bash
+AIRLOCK_UI_BASE_PATH="" npm run build
+```
+
 ## Notes
 
 - `basePath` is `/ui` and `trailingSlash` is on, so the export produces
   `index.html` and `record/index.html`, which `StaticFiles(html=True)` serves
   directly.
+- The `/ui` build reads only the live same-origin API and surfaces backend
+  errors. The root build reads only the captured snapshot. An API failure can
+  never switch a live operator view to unrelated fixture data.
 - Fonts are self-hosted by `next/font`. The built pages make no external
   requests, so the interface works with no network.
 - Every value on these pages comes from the server under audit. React escapes

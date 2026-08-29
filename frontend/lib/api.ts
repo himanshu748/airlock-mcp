@@ -5,12 +5,13 @@ import type { CaseDetail, CaseSummary } from "./types";
 //
 // The hosted build has no backend behind it: Airlock keeps signed case state
 // on disk, runs audits past any serverless request budget and launches stdio
-// servers as child processes, none of which survive a static host. So when
-// /api is absent the interface reads a captured snapshot of a real audit
-// instead, and says so rather than looking live.
-export const SNAPSHOT_PATH = "/snapshot";
+// servers as child processes, none of which survive a static host. Its build
+// explicitly selects a captured snapshot. The live build never turns an API
+// outage or authorization failure into unrelated fixture data.
+const UI_BASE_PATH = process.env.NEXT_PUBLIC_AIRLOCK_UI_BASE_PATH ?? "/ui";
+export const SNAPSHOT_PATH = `${UI_BASE_PATH}/snapshot`;
 
-let snapshotMode = false;
+const snapshotMode = process.env.NEXT_PUBLIC_AIRLOCK_SNAPSHOT_MODE === "true";
 
 export function isSnapshot(): boolean {
   return snapshotMode;
@@ -31,16 +32,10 @@ async function getJsonOrSnapshot<T>(
   path: string,
   snapshotPath: string,
 ): Promise<T> {
-  if (!snapshotMode) {
-    try {
-      return await getJson<T>(path);
-    } catch {
-      // Fall through to the snapshot rather than failing the page.
-    }
+  if (snapshotMode) {
+    return getJson<T>(snapshotPath);
   }
-  const value = await getJson<T>(snapshotPath);
-  snapshotMode = true;
-  return value;
+  return getJson<T>(path);
 }
 
 export function listCases(): Promise<{ cases: CaseSummary[] }> {

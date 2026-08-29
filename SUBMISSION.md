@@ -88,8 +88,8 @@ sensor exists, from `evidence_missing`, where a sensor existed and saw nothing.
 
 **Launching a server is the one place Airlock executes what it distrusts.** So
 the command never comes from a case or a model. The operator writes a fixed
-table of named commands and a case selects a name. Names are looked up, never
-parsed into commands.
+table of named argument arrays and a case selects a name. Names are looked up,
+never parsed into commands.
 
 ## Boundaries, stated
 
@@ -99,6 +99,12 @@ parsed into commands.
   probes that ran.
 - `AIRLOCK_MAX_AUDIT_RESPONSE_BYTES` does not apply to stdio, because that cap
   lives in the HTTP transport.
+- The public control workflow opens a fresh stdio process for inventory and
+  each tool probe, so it does not claim to observe behavior that depends on
+  state shared across separate tools or calls.
+- Bounded stderr diagnostics are retained on POSIX. Windows discards child
+  stderr because its pipe read cannot be interrupted safely by this
+  implementation; that avoids leaking a thread and descriptor per audit.
 - Approval identity is not attested by MCP, and decisions are persisted
   explicitly marked unattested.
 - The hosted page carries a captured record, not a live backend, and says so on
@@ -112,4 +118,5 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -q
 ```
 
-The README's quickstart runs a full fixture audit in two commands.
+292 tests pass. The README's quickstart runs a full fixture audit in two
+commands.

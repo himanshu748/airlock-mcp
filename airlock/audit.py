@@ -231,8 +231,8 @@ class AuditExecutor:
                     )
                 ),
             )
-        except Exception:
-            return self._record_inventory_failure(case_id)
+        except Exception as exc:
+            return self._record_inventory_failure(case_id, error=exc)
 
     async def run(
         self,
@@ -322,11 +322,12 @@ class AuditExecutor:
                             observer_offset=observer_offset,
                             deadline=audit_deadline,
                         )
-        except Exception:
+        except Exception as exc:
             return self._record_transport_failure(
                 case_id,
                 tool_names=[item.name for item in case.declared_tools],
                 canaries=canaries,
+                error=exc,
             )
 
         return self._finish_if_covered(case_id, canaries=canaries)
@@ -417,11 +418,12 @@ class AuditExecutor:
                         observer_offset=observer_offset,
                         deadline=audit_deadline,
                     )
-        except Exception:
+        except Exception as exc:
             return self._record_transport_failure(
                 case_id,
                 tool_names=[tool_name],
                 canaries=canaries,
+                error=exc,
             )
         return self._finish_if_covered(case_id, canaries=canaries)
 
@@ -676,7 +678,12 @@ class AuditExecutor:
             checks=checks,
         )
 
-    def _record_inventory_failure(self, case_id: str) -> CaseRecord:
+    def _record_inventory_failure(
+        self,
+        case_id: str,
+        *,
+        error: Exception | None = None,
+    ) -> CaseRecord:
         self.case_service.store.append_event(
             case_id,
             EvidenceEvent(
@@ -685,10 +692,7 @@ class AuditExecutor:
                 tool="__catalog__",
                 kind=EventKind.SENSOR_FAILURE,
                 sensor="mcp_inventory",
-                details={
-                    "checks": [],
-                    "failure_class": "transport_protocol_or_bound",
-                },
+                details=_transport_failure_details(error, checks=[]),
             ),
         )
         return self.case_service.store.mark_incomplete(case_id)
@@ -699,6 +703,7 @@ class AuditExecutor:
         *,
         tool_names: list[str],
         canaries: dict[str, str],
+        error: Exception | None = None,
     ) -> CaseRecord:
         for tool_name in tool_names:
             self.case_service.store.append_event(
@@ -709,10 +714,10 @@ class AuditExecutor:
                     tool=tool_name,
                     kind=EventKind.SENSOR_FAILURE,
                     sensor="audit_transport",
-                    details={
-                        "checks": [check.value for check in CheckName],
-                        "failure_class": "transport_protocol_or_bound",
-                    },
+                    details=_transport_failure_details(
+                        error,
+                        checks=[check.value for check in CheckName],
+                    ),
                 ),
             )
         current = self.case_service.store.load_case(case_id)
@@ -959,6 +964,22 @@ _STDIO_DRAIN_GRACE_SECONDS = 0.5
 _CAN_POLL_PIPES = os.name != "nt"
 
 
+def _transport_failure_details(
+    error: Exception | None,
+    *,
+    checks: list[str],
+) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "checks": checks,
+        "failure_class": "transport_protocol_or_bound",
+    }
+    if isinstance(error, StdioLaunchError):
+        details["failure_class"] = "stdio_transport_or_protocol"
+        if error.stderr_tail:
+            details["stderr_tail"] = error.stderr_tail[-_STDIO_STDERR_CAPTURE_BYTES:]
+    return details
+
+
 def _stdio_child_environment(workdir: str) -> dict[str, str]:
     environment = {
         name: "" for name in _STDIO_INHERITED_ENV_VARS
@@ -993,14 +1014,15 @@ class _BoundedStderr:
     """
 
     def __init__(self, limit: int = _STDIO_STDERR_CAPTURE_BYTES) -> None:
+        if not _CAN_POLL_PIPES:
+            raise RuntimeError("bounded stderr capture requires pollable pipes")
         self._limit = limit
         self._chunks: deque[bytes] = deque()
         self._size = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._read_fd, self._write_fd = os.pipe()
-        if _CAN_POLL_PIPES:
-            os.set_blocking(self._read_fd, False)
+        os.set_blocking(self._read_fd, False)
         self._writer = os.fdopen(self._write_fd, "wb", buffering=0)
         self._thread = threading.Thread(target=self._drain, daemon=True)
         self._thread.start()
@@ -1008,10 +1030,9 @@ class _BoundedStderr:
     def _drain(self) -> None:
         try:
             while not self._stop.is_set():
-                if _CAN_POLL_PIPES:
-                    ready, _, _ = select.select([self._read_fd], [], [], 0.1)
-                    if not ready:
-                        continue
+                ready, _, _ = select.select([self._read_fd], [], [], 0.1)
+                if not ready:
+                    continue
                 try:
                     chunk = os.read(self._read_fd, 4096)
                 except BlockingIOError:
@@ -1056,6 +1077,34 @@ class _BoundedStderr:
             self._thread.join(timeout=_STDIO_DRAIN_GRACE_SECONDS)
 
 
+class _DiscardingStderr:
+    """A leak-free stderr sink for platforms whose pipes cannot be polled."""
+
+    def __init__(self) -> None:
+        self._stream = open(os.devnull, "wb")
+
+    @property
+    def stream(self) -> Any:
+        return self._stream
+
+    def tail(self) -> str:
+        return ""
+
+    def close(self) -> None:
+        self._stream.close()
+
+
+def _stderr_capture_for_platform(
+    *,
+    can_poll_pipes: bool | None = None,
+) -> _BoundedStderr | _DiscardingStderr:
+    if can_poll_pipes is None:
+        can_poll_pipes = _CAN_POLL_PIPES
+    if can_poll_pipes:
+        return _BoundedStderr()
+    return _DiscardingStderr()
+
+
 @asynccontextmanager
 async def _open_stdio_client(stdio_target: StdioTarget):
     with tempfile.TemporaryDirectory(prefix="airlock-stdio-") as workdir:
@@ -1067,7 +1116,8 @@ async def _open_stdio_client(stdio_target: StdioTarget):
         )
         # A server that fails to start says why on stderr. Discarding it left
         # an operator with a bare transport failure and nothing to act on.
-        errlog = _BoundedStderr()
+        errlog = _stderr_capture_for_platform()
+        failure: Exception | None = None
         try:
             async with Client(
                 stdio_client(parameters, errlog=errlog.stream),
@@ -1075,9 +1125,11 @@ async def _open_stdio_client(stdio_target: StdioTarget):
             ) as client:
                 yield client
         except Exception as exc:
-            raise StdioLaunchError(stdio_target, errlog.tail()) from exc
+            failure = exc
         finally:
             errlog.close()
+        if failure is not None:
+            raise StdioLaunchError(stdio_target, errlog.tail()) from failure
 
 
 @asynccontextmanager

@@ -13,6 +13,7 @@ commands.
 
 from __future__ import annotations
 
+import json
 import shlex
 from collections.abc import Mapping
 
@@ -43,14 +44,17 @@ def stdio_target_name(target_url: str) -> str:
 
 
 def parse_stdio_targets(raw: str | None) -> dict[str, StdioTarget]:
-    """Parse ``name=command arg arg;name=command`` into a target table.
+    """Parse an operator-owned target table.
 
-    Commands are split with shlex once, here, from operator configuration. No
-    shell is involved at parse time or at launch time.
+    A JSON object whose values are argument arrays is the portable format. The
+    original ``name=command arg;name=command`` form remains available for
+    concise POSIX deployments. No shell is involved at parse or launch time.
     """
 
     if not raw:
         return {}
+    if raw.lstrip().startswith("{"):
+        return _parse_structured_targets(raw)
     targets: dict[str, StdioTarget] = {}
     for entry in raw.split(";"):
         entry = entry.strip()
@@ -69,6 +73,47 @@ def parse_stdio_targets(raw: str | None) -> dict[str, StdioTarget]:
         if len(parts) - 1 > _MAX_ARGS:
             raise StdioTargetError(f"stdio target {name} has too many arguments")
         targets[name] = StdioTarget(name=name, command=parts[0], args=parts[1:])
+    return targets
+
+
+def _parse_structured_targets(raw: str) -> dict[str, StdioTarget]:
+    def reject_duplicate_names(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for name, command in pairs:
+            if name in value:
+                raise StdioTargetError(f"duplicate stdio target name: {name}")
+            value[name] = command
+        return value
+
+    try:
+        configured = json.loads(raw, object_pairs_hook=reject_duplicate_names)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise StdioTargetError("stdio target JSON is invalid") from exc
+    if not isinstance(configured, dict):
+        raise StdioTargetError("stdio target JSON must be an object")
+
+    targets: dict[str, StdioTarget] = {}
+    for name, parts in configured.items():
+        if not isinstance(name, str):
+            raise StdioTargetError("stdio target names must be strings")
+        stdio_target_name(f"{STDIO_SCHEME}{name}")
+        if (
+            not isinstance(parts, list)
+            or not parts
+            or not all(isinstance(part, str) for part in parts)
+        ):
+            raise StdioTargetError(
+                f"stdio target {name} must be a non-empty JSON string array"
+            )
+        if len(parts) - 1 > _MAX_ARGS:
+            raise StdioTargetError(f"stdio target {name} has too many arguments")
+        if not parts[0] or any("\0" in part for part in parts):
+            raise StdioTargetError(f"stdio target {name} has an invalid command")
+        targets[name] = StdioTarget(
+            name=name,
+            command=parts[0],
+            args=parts[1:],
+        )
     return targets
 
 

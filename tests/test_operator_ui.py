@@ -4,6 +4,8 @@ These guard the properties that make that survivable, across both the built
 export the backend actually serves and the frontend source it is built from.
 """
 
+import os
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -22,6 +24,18 @@ def _source_files() -> list[Path]:
         for directory in ("app", "components", "lib")
         for path in (FRONTEND / directory).rglob("*.ts*")
     ]
+
+
+def _run_api_module(script: str, **environment: str) -> list[str]:
+    result = subprocess.run(
+        ["node", "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", "--input-type=module", "-e", script],
+        cwd=ROOT,
+        env={**os.environ, **environment},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.splitlines()
 
 
 def test_the_built_export_ships_both_pages():
@@ -109,6 +123,49 @@ def test_the_export_is_pinned_to_the_route_the_backend_mounts():
     # The mount the default has to agree with.
     app = (ROOT / "airlock" / "app.py").read_text(encoding="utf-8")
     assert '"/ui"' in app
+
+
+def test_live_interface_does_not_hide_backend_failures_with_a_snapshot():
+    lines = _run_api_module(
+        """
+        const calls = [];
+        globalThis.fetch = async (path) => {
+          calls.push(path);
+          return { ok: false, status: 500 };
+        };
+        const api = await import('./frontend/lib/api.ts?live-mode');
+        try { await api.listCases(); } catch (error) {
+          console.log(error.message);
+        }
+        console.log(JSON.stringify(calls));
+        """,
+        NEXT_PUBLIC_AIRLOCK_UI_BASE_PATH="/ui",
+        NEXT_PUBLIC_AIRLOCK_SNAPSHOT_MODE="false",
+    )
+
+    assert lines == [
+        "Airlock returned HTTP 500 for /api/cases",
+        '["/api/cases"]',
+    ]
+
+
+def test_hosted_interface_reads_the_snapshot_at_its_build_base_path():
+    lines = _run_api_module(
+        """
+        const calls = [];
+        globalThis.fetch = async (path) => {
+          calls.push(path);
+          return { ok: true, json: async () => ({ cases: [] }) };
+        };
+        const api = await import('./frontend/lib/api.ts?hosted-mode');
+        await api.listCases();
+        console.log(JSON.stringify(calls));
+        """,
+        NEXT_PUBLIC_AIRLOCK_UI_BASE_PATH="",
+        NEXT_PUBLIC_AIRLOCK_SNAPSHOT_MODE="true",
+    )
+
+    assert lines == ['["/snapshot/cases.json"]']
 
 
 def test_an_unaudited_tool_is_never_stamped_cleared():

@@ -202,11 +202,16 @@ Most MCP servers ship as a command rather than a URL. Airlock can audit those
 too, but launching one means executing the code the audit exists to distrust, so
 the command never comes from the model or from a case argument.
 
-The operator writes a fixed table of named commands. A case selects a name.
+The operator writes a fixed table of named argument arrays. A case selects a
+name. JSON keeps Windows backslashes and paths with spaces unambiguous without
+ever invoking a shell:
 
 ```bash
-export AIRLOCK_STDIO_TARGETS='memory=npx -y @modelcontextprotocol/server-memory;git=uvx mcp-server-git --repository /tmp/sandbox'
+export AIRLOCK_STDIO_TARGETS='{"memory":["npx","-y","@modelcontextprotocol/server-memory"],"git":["uvx","mcp-server-git","--repository","/tmp/sandbox"]}'
 ```
+
+The original `name=command arg;name=command` form remains available as a
+concise POSIX-only format. Use JSON for portable deployment configuration.
 
 Then open a case against `stdio:memory`. Names are looked up, never parsed into
 commands, so there is no path from a server, a tool result or a model-supplied
@@ -216,9 +221,10 @@ The child runs in a throwaway working directory. The MCP SDK merges the
 supplied environment over a default that inherits `HOME`, `LOGNAME`, `PATH`,
 `SHELL`, `TERM` and `USER` from the host, so Airlock names every one of them:
 `PATH` is passed through, the home and temporary directories point at the
-throwaway, and the rest are emptied.
+throwaway, and the rest are emptied. Windows profile and temporary-directory
+variables are redirected too.
 
-Three limits are deliberate:
+Five limits are deliberate:
 
 - **Audit only.** The enforcing proxy forwards to an HTTP upstream, and a
   launched process has none. `emit_policy` refuses a stdio case rather than
@@ -231,6 +237,16 @@ Three limits are deliberate:
   by the HTTP transport, and the stdio transport is the SDK's. A launched
   server can return a response large enough to exhaust the auditor's memory
   before Airlock sees it. The audit deadline still bounds the run.
+- **The control workflow opens a fresh process for inventory and each
+  `probe_tool` call.** Airlock observes each tool invocation, but it does not
+  claim to detect behavior that requires state carried across different tools
+  or control calls. The in-process `AuditExecutor.run` path keeps one probe
+  session for its batch, but the public six-tool control workflow does not.
+- **Bounded stderr diagnostics are POSIX-only.** A pollable pipe keeps the last
+  8 KiB without allowing a hostile server to fill memory or disk. Windows pipe
+  reads cannot be interrupted safely through this implementation, so Airlock
+  discards child stderr there instead of leaking a thread and descriptor per
+  audit.
 
 Process isolation beyond the working directory and environment is the
 deployment's job. Airlock does not sandbox the child's filesystem or network.
