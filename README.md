@@ -48,7 +48,7 @@ the write and puts the tool behind an approval gate in the emitted policy.
 
 ## Run the demo
 
-Python 3.10 or newer. From a clone:
+Python 3.12 or newer. From a clone:
 
 ```bash
 python3 -m venv .venv
