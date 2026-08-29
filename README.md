@@ -10,6 +10,31 @@ the policy is applied on the wire rather than trusted to the client.
 
 > Airlock reports what it observed. Absence of a finding is not proof of safety.
 
+## Hosted page
+
+<https://airlock-mcp.vercel.app>
+
+The landing page and an inspection record you can read without installing
+anything. The record is a **captured snapshot of a real fixture audit**, not a
+live backend, and the page says so at the top of itself.
+
+Airlock's backend cannot run on a static or serverless host, and pretending
+otherwise would be the kind of claim this project exists to argue against:
+
+- Case state is signed JSON on disk, and `open_case` then `probe_tool` are
+  separate requests. A filesystem that does not survive between them loses the
+  case.
+- An audit is bounded at 240 seconds by design, which outlives a typical
+  serverless request budget.
+- `stdio:` targets launch a child process.
+- The enforcing proxy has to hold sealed-case state to refuse a tool call
+  before it reaches the server.
+- The operator interface refuses any peer that is not loopback, which is every
+  peer on a public host.
+
+Run it locally to audit a server of your own. The quickstart below is two
+commands.
+
 ## The gap this closes
 
 An agent harness decides which tools need human approval by reading the
