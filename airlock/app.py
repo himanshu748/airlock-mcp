@@ -177,6 +177,7 @@ def create_app(
     target_resolver: TargetResolver = _system_resolver,
     allow_local_targets: bool = False,
     allowed_target_hostnames: Sequence[str] | None = None,
+    stdio_targets: Mapping[str, StdioTarget] | None = None,
     observation_capabilities_by_mode: Mapping[
         EvidenceMode, ObservationCapabilities
     ]
@@ -240,6 +241,7 @@ def create_app(
         credential_target_urls=(
             normalized_authenticated_targets or None
         ),
+        stdio_targets=stdio_targets,
     )
     audit_executor = AuditExecutor(
         case_service,

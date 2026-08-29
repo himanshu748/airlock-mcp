@@ -40,6 +40,43 @@ const AUDITS: Audit[] = [
   },
 ];
 
+const STDIO_SERVERS: [string, string][] = [
+  ["@modelcontextprotocol/server-filesystem", "14 tools"],
+  ["@modelcontextprotocol/server-everything", "13 tools"],
+  ["mcp-server-git", "12 tools"],
+  ["@modelcontextprotocol/server-memory", "9 tools"],
+  ["@modelcontextprotocol/server-sequential-thinking", "1 tool"],
+];
+
+export function StdioBreadth() {
+  return (
+    <div className="card p-6 lg:p-8">
+      <p className="label mb-5">Also audited, launched as commands</p>
+      <ul className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
+        {STDIO_SERVERS.map(([name, tools]) => (
+          <li
+            key={name}
+            className="flex items-baseline justify-between gap-4 border-b border-pencil-dim/30 pb-2.5"
+          >
+            <span className="font-mono text-[13px] break-all text-form">
+              {name}
+            </span>
+            <span className="shrink-0 font-mono text-[12.5px] text-pencil">
+              {tools}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-6 text-[14px] leading-relaxed text-pencil">
+        Most MCP servers ship as a command rather than a URL, so Airlock can
+        launch one and audit it the same way. The command comes from operator
+        configuration, never from a case or a model, because running an audited
+        server means executing the code the audit exists to distrust.
+      </p>
+    </div>
+  );
+}
+
 export function RealAudits() {
   return (
     <div className="grid gap-4 lg:grid-cols-2">

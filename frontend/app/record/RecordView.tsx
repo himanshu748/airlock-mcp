@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listCases, readCase } from "@/lib/api";
+import { isSnapshot, listCases, readCase } from "@/lib/api";
 import type { CaseDetail, CaseSummary } from "@/lib/types";
 import { VERDICT_RANK, formatTimestamp, humanise, verdictOf } from "@/lib/verdict";
 import { Stamp } from "@/components/Stamp";
@@ -20,6 +20,7 @@ export function RecordView() {
   // Overlapping selections must not let a slower earlier response overwrite a
   // newer one, or clear a loaded case with a stale failure.
   const latestRequest = useRef(0);
+  const [snapshot, setSnapshot] = useState(false);
 
   const select = useCallback(async (caseId: string) => {
     const token = ++latestRequest.current;
@@ -43,6 +44,7 @@ export function RecordView() {
       try {
         const { cases: found } = await listCases();
         if (cancelled) return;
+        setSnapshot(isSnapshot());
         setCases(found);
         if (found.length === 0) {
           setState("empty");
@@ -123,6 +125,18 @@ export function RecordView() {
             .
           </p>
         </EmptyState>
+      )}
+
+      {snapshot && (
+        <p
+          role="status"
+          className="border-b border-hold/40 bg-hold/10 px-6 py-3 font-mono text-[13px] leading-relaxed text-hold lg:px-10"
+        >
+          No Airlock backend is reachable from here, so this is a captured
+          record of a real audit rather than a live one. Nothing on this page
+          is being observed right now. Run Airlock locally to audit a server of
+          your own.
+        </p>
       )}
 
       {state === "ready" && detail && (

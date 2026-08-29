@@ -111,6 +111,19 @@ class TargetBinding(StrictModel):
     resolved_ips: list[str]
 
 
+class StdioTarget(StrictModel):
+    """A command the operator authorized Airlock to launch and audit.
+
+    The command and arguments come from deployment configuration only. A case
+    selects one by name, so nothing a server or a model supplies can reach an
+    argument vector.
+    """
+
+    name: str
+    command: str
+    args: list[str] = Field(default_factory=list)
+
+
 class ToolDeclaration(StrictModel):
     name: str
     description: str = ""
@@ -176,6 +189,7 @@ class CaseRecord(StrictModel):
     airlock_version: str = AIRLOCK_VERSION
     target_url: str
     target_binding: Optional[TargetBinding] = None
+    stdio_target: Optional[StdioTarget] = None
     created_at: datetime
     status: CaseStatus = CaseStatus.CREATED
     evidence_mode: EvidenceMode = EvidenceMode.TRANSCRIPT_ONLY
@@ -220,11 +234,13 @@ class CaseRecord(StrictModel):
         evidence_mode: EvidenceMode = EvidenceMode.TRANSCRIPT_ONLY,
         proxy_url: Optional[str] = None,
         target_binding: Optional[TargetBinding] = None,
+        stdio_target: Optional[StdioTarget] = None,
     ) -> "CaseRecord":
         return cls(
             case_id=case_id,
             target_url=target_url,
             target_binding=target_binding,
+            stdio_target=stdio_target,
             created_at=datetime.now(timezone.utc),
             declared_scope=declared_scope,
             observation_capabilities=observation_capabilities,

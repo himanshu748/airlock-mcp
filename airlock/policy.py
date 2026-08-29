@@ -21,6 +21,14 @@ class PolicyInvariantError(ValueError):
 
 
 def _require_allowed_case(case: CaseRecord) -> None:
+    if case.stdio_target is not None:
+        # The enforcing proxy forwards to an HTTP upstream. A launched process
+        # has none, so there is no wire for a policy to be enforced on. Saying
+        # so is better than emitting a connector that nothing holds.
+        raise PolicyInvariantError(
+            "stdio cases are audit-only: the enforcing proxy has no HTTP "
+            "upstream to forward to, so no connector policy is emitted"
+        )
     if case.audit_completed_at is None or not case.probes:
         raise PolicyInvariantError("a completed audit is required")
     declared = {tool.name for tool in case.declared_tools}

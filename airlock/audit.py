@@ -4,14 +4,20 @@ import asyncio
 import hashlib
 import json
 import multiprocessing
+import os
+import selectors
+import threading
 import sys
+import tempfile
 from contextlib import asynccontextmanager
+from collections import deque
 from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
 
 import httpx2
 from mcp import Client
+from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from .auth_context import ANONYMOUS_AUTH_CONTEXT, fingerprint_auth_context
@@ -32,6 +38,7 @@ from .models import (
     EvidenceEvent,
     EventKind,
     ProbeRecord,
+    StdioTarget,
     TargetBinding,
     ToolDeclaration,
 )
@@ -46,6 +53,18 @@ _EXPECTED_CANARY_LABELS = ("document_secret",)
 # A teardown that starts after the audit deadline still has to be bounded,
 # or a stalled shutdown hangs the caller instead of the audit.
 _TEARDOWN_GRACE_SECONDS = 5.0
+
+
+class StdioLaunchError(RuntimeError):
+    """A stdio server failed, carrying the tail of what it printed to stderr."""
+
+    def __init__(self, stdio_target: StdioTarget, stderr_tail: str) -> None:
+        detail = f": {stderr_tail}" if stderr_tail else ""
+        super().__init__(
+            f"stdio target {stdio_target.name} failed{detail}"
+        )
+        self.stdio_target = stdio_target
+        self.stderr_tail = stderr_tail
 
 
 class AuditExecutor:
@@ -137,6 +156,7 @@ class AuditExecutor:
             async with _open_client_with_timeout(
                 target_reference,
                 binding=case.target_binding if target is None else None,
+                stdio_target=case.stdio_target if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
                 deadline=inventory_deadline,
@@ -211,8 +231,8 @@ class AuditExecutor:
                     )
                 ),
             )
-        except Exception:
-            return self._record_inventory_failure(case_id)
+        except Exception as exc:
+            return self._record_inventory_failure(case_id, error=exc)
 
     async def run(
         self,
@@ -253,6 +273,7 @@ class AuditExecutor:
             async with _open_client_with_timeout(
                 target_reference,
                 binding=case.target_binding if target is None else None,
+                stdio_target=case.stdio_target if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
                 deadline=audit_deadline,
@@ -301,11 +322,12 @@ class AuditExecutor:
                             observer_offset=observer_offset,
                             deadline=audit_deadline,
                         )
-        except Exception:
+        except Exception as exc:
             return self._record_transport_failure(
                 case_id,
                 tool_names=[item.name for item in case.declared_tools],
                 canaries=canaries,
+                error=exc,
             )
 
         return self._finish_if_covered(case_id, canaries=canaries)
@@ -380,6 +402,7 @@ class AuditExecutor:
             async with _open_client_with_timeout(
                 target_reference,
                 binding=case.target_binding if target is None else None,
+                stdio_target=case.stdio_target if target is None else None,
                 headers=self.target_headers if target is None else None,
                 max_response_bytes=self.max_audit_response_bytes,
                 deadline=audit_deadline,
@@ -395,11 +418,12 @@ class AuditExecutor:
                         observer_offset=observer_offset,
                         deadline=audit_deadline,
                     )
-        except Exception:
+        except Exception as exc:
             return self._record_transport_failure(
                 case_id,
                 tool_names=[tool_name],
                 canaries=canaries,
+                error=exc,
             )
         return self._finish_if_covered(case_id, canaries=canaries)
 
@@ -654,7 +678,12 @@ class AuditExecutor:
             checks=checks,
         )
 
-    def _record_inventory_failure(self, case_id: str) -> CaseRecord:
+    def _record_inventory_failure(
+        self,
+        case_id: str,
+        *,
+        error: Exception | None = None,
+    ) -> CaseRecord:
         self.case_service.store.append_event(
             case_id,
             EvidenceEvent(
@@ -663,10 +692,7 @@ class AuditExecutor:
                 tool="__catalog__",
                 kind=EventKind.SENSOR_FAILURE,
                 sensor="mcp_inventory",
-                details={
-                    "checks": [],
-                    "failure_class": "transport_protocol_or_bound",
-                },
+                details=_transport_failure_details(error, checks=[]),
             ),
         )
         return self.case_service.store.mark_incomplete(case_id)
@@ -677,6 +703,7 @@ class AuditExecutor:
         *,
         tool_names: list[str],
         canaries: dict[str, str],
+        error: Exception | None = None,
     ) -> CaseRecord:
         for tool_name in tool_names:
             self.case_service.store.append_event(
@@ -687,10 +714,10 @@ class AuditExecutor:
                     tool=tool_name,
                     kind=EventKind.SENSOR_FAILURE,
                     sensor="audit_transport",
-                    details={
-                        "checks": [check.value for check in CheckName],
-                        "failure_class": "transport_protocol_or_bound",
-                    },
+                    details=_transport_failure_details(
+                        error,
+                        checks=[check.value for check in CheckName],
+                    ),
                 ),
             )
         current = self.case_service.store.load_case(case_id)
@@ -886,6 +913,7 @@ async def _open_client_with_timeout(
     timeout_seconds: float,
     deadline: float | None = None,
     binding: TargetBinding | None = None,
+    stdio_target: StdioTarget | None = None,
     headers: Mapping[str, str] | None = None,
     max_response_bytes: int = 4 * 1024 * 1024,
 ):
@@ -903,6 +931,7 @@ async def _open_client_with_timeout(
     manager = _open_client(
         target,
         binding=binding,
+        stdio_target=stdio_target,
         headers=headers,
         max_response_bytes=max_response_bytes,
     )
@@ -922,14 +951,237 @@ async def _open_client_with_timeout(
         )
 
 
+# The SDK merges the supplied env over get_default_environment(), which
+# inherits HOME, LOGNAME, PATH, SHELL, TERM and USER from the host. Naming
+# every one of them makes the child's environment ours rather than whatever
+# the SDK decided to pass through.
+_STDIO_INHERITED_ENV_VARS = ("HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER")
+_STDIO_STDERR_CAPTURE_BYTES = 8 * 1024
+# Teardown budget for the stderr drain, applied twice at most.
+_STDIO_DRAIN_GRACE_SECONDS = 0.5
+# Windows readiness APIs exposed by selectors handle sockets rather than pipe
+# descriptors, so a child pipe cannot be polled safely with this implementation.
+_CAN_POLL_PIPES = os.name != "nt"
+
+
+def _transport_failure_details(
+    error: Exception | None,
+    *,
+    checks: list[str],
+) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "checks": checks,
+        "failure_class": "transport_protocol_or_bound",
+    }
+    if isinstance(error, StdioLaunchError):
+        details["failure_class"] = "stdio_transport_or_protocol"
+        if error.stderr_tail:
+            details["stderr_tail"] = error.stderr_tail[-_STDIO_STDERR_CAPTURE_BYTES:]
+    return details
+
+
+def _stdio_child_environment(workdir: str) -> dict[str, str]:
+    environment = {
+        name: "" for name in _STDIO_INHERITED_ENV_VARS
+    }
+    environment.update(
+        {
+            # os.defpath is the platform's own fallback, so a Windows host
+            # does not inherit a POSIX search path that resolves nothing.
+            "PATH": os.environ.get("PATH") or os.defpath,
+            "HOME": workdir,
+            "TMPDIR": workdir,
+            # Windows reads these rather than HOME and TMPDIR.
+            "USERPROFILE": workdir,
+            "TEMP": workdir,
+            "TMP": workdir,
+        }
+    )
+    return environment
+
+
+class _BoundedStderr:
+    """Drains a child's stderr, keeping only the last bytes.
+
+    The SDK hands errlog straight to the subprocess as its stderr, so it has
+    to be a real file descriptor. Writing that to a file would let a chatty or
+    hostile server fill the disk, and never reading the pipe would let it block
+    once the buffer filled.
+
+    The drain stops on a flag rather than on end of file. A server that spawns
+    a descendant holding the same stderr never closes the pipe, so waiting for
+    EOF would leak this thread and its descriptor for the life of the process.
+    """
+
+    def __init__(self, limit: int = _STDIO_STDERR_CAPTURE_BYTES) -> None:
+        if not _CAN_POLL_PIPES:
+            raise RuntimeError("bounded stderr capture requires pollable pipes")
+        self._limit = limit
+        self._chunks: deque[bytes] = deque()
+        self._size = 0
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        selector = selectors.DefaultSelector()
+        read_fd = -1
+        write_fd = -1
+        try:
+            read_fd, write_fd = os.pipe()
+            os.set_blocking(read_fd, False)
+            selector.register(read_fd, selectors.EVENT_READ)
+            writer = os.fdopen(write_fd, "wb", buffering=0)
+        except BaseException:
+            selector.close()
+            for descriptor in (read_fd, write_fd):
+                if descriptor < 0:
+                    continue
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            raise
+        self._selector = selector
+        self._read_fd = read_fd
+        self._write_fd = write_fd
+        self._writer = writer
+        self._thread = threading.Thread(target=self._drain, daemon=True)
+        try:
+            self._thread.start()
+        except BaseException:
+            try:
+                self._writer.close()
+            except OSError:
+                pass
+            try:
+                self._selector.close()
+            finally:
+                try:
+                    os.close(self._read_fd)
+                except OSError:
+                    pass
+            raise
+
+    def _drain(self) -> None:
+        try:
+            while not self._stop.is_set():
+                if not self._selector.select(timeout=0.1):
+                    continue
+                try:
+                    chunk = os.read(self._read_fd, 4096)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    return
+                if not chunk:
+                    return
+                with self._lock:
+                    self._chunks.append(chunk)
+                    self._size += len(chunk)
+                    while self._size > self._limit and len(self._chunks) > 1:
+                        self._size -= len(self._chunks.popleft())
+        finally:
+            self._selector.close()
+            try:
+                os.close(self._read_fd)
+            except OSError:
+                pass
+
+    @property
+    def stream(self) -> Any:
+        return self._writer
+
+    def tail(self) -> str:
+        with self._lock:
+            captured = b"".join(self._chunks)
+        return captured[-self._limit :].decode("utf-8", "replace").strip()
+
+    def close(self) -> None:
+        # Close the writer first so the pipe can reach end of file, then give
+        # the drain a moment to take what is still buffered. Setting the flag
+        # straight away would discard exactly the tail worth keeping.
+        try:
+            self._writer.close()
+        except OSError:
+            pass
+        self._thread.join(timeout=_STDIO_DRAIN_GRACE_SECONDS)
+        if self._thread.is_alive():
+            # A descendant inherited stderr, so end of file never comes. The
+            # drain checks the flag every 100ms, so this returns promptly.
+            self._stop.set()
+            self._thread.join(timeout=_STDIO_DRAIN_GRACE_SECONDS)
+
+
+class _DiscardingStderr:
+    """A leak-free stderr sink for platforms whose pipes cannot be polled."""
+
+    def __init__(self) -> None:
+        self._stream = open(os.devnull, "wb")
+
+    @property
+    def stream(self) -> Any:
+        return self._stream
+
+    def tail(self) -> str:
+        return ""
+
+    def close(self) -> None:
+        self._stream.close()
+
+
+def _stderr_capture_for_platform(
+    *,
+    can_poll_pipes: bool | None = None,
+) -> _BoundedStderr | _DiscardingStderr:
+    if can_poll_pipes is None:
+        can_poll_pipes = _CAN_POLL_PIPES
+    if can_poll_pipes:
+        return _BoundedStderr()
+    return _DiscardingStderr()
+
+
+@asynccontextmanager
+async def _open_stdio_client(stdio_target: StdioTarget):
+    with tempfile.TemporaryDirectory(prefix="airlock-stdio-") as workdir:
+        parameters = StdioServerParameters(
+            command=stdio_target.command,
+            args=list(stdio_target.args),
+            env=_stdio_child_environment(workdir),
+            cwd=workdir,
+        )
+        # A server that fails to start says why on stderr. Discarding it left
+        # an operator with a bare transport failure and nothing to act on.
+        errlog = _stderr_capture_for_platform()
+        failure: Exception | None = None
+        try:
+            async with Client(
+                stdio_client(parameters, errlog=errlog.stream),
+                mode="auto",
+            ) as client:
+                yield client
+        except Exception as exc:
+            failure = exc
+        finally:
+            errlog.close()
+        if failure is not None:
+            raise StdioLaunchError(stdio_target, errlog.tail()) from failure
+
+
 @asynccontextmanager
 async def _open_client(
     target: Any,
     *,
     binding: TargetBinding | None = None,
+    stdio_target: StdioTarget | None = None,
     headers: Mapping[str, str] | None = None,
     max_response_bytes: int = 4 * 1024 * 1024,
 ):
+    if stdio_target is not None:
+        # Launching the audited server is the one place Airlock executes the
+        # thing it distrusts. The command comes from deployment configuration,
+        # the environment is not inherited, and the working directory is a
+        # throwaway the caller owns.
+        async with _open_stdio_client(stdio_target) as client:
+            yield client
+        return
     if isinstance(target, str):
         if binding is None:
             raise ValueError("URL targets require a validated target binding")

@@ -357,10 +357,17 @@ def create_control_server(
             evidence_mode=evidence_mode,
             capabilities=capabilities,
         )
+        if case.stdio_target is not None:
+            return {
+                **_case_summary(case),
+                "target_kind": "stdio",
+                "stdio_target": case.stdio_target.name,
+            }
         if case.target_binding is None:
             raise RuntimeError("case service did not persist a validated target binding")
         return {
             **_case_summary(case),
+            "target_kind": "http",
             "target_hostname": case.target_binding.hostname,
             "target_port": case.target_binding.port,
             "resolved_ips": case.target_binding.resolved_ips,
