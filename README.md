@@ -12,6 +12,31 @@ the policy is applied on the wire rather than trusted to the client.
 
 > Airlock reports what it observed. Absence of a finding is not proof of safety.
 
+## Built for TrueForge
+
+Airlock is itself an MCP server, so a TrueForge agent drives the entire audit
+from one chat message: open the case, inventory the tools, probe each one, read
+the evidence, then decide. The agent spec is
+[`configs/trueforge-agent.json`](configs/trueforge-agent.json) and the skill is
+[`skills/airlock-audit/SKILL.md`](skills/airlock-audit/SKILL.md).
+
+The spec names `probe_tool`, `seal_case` and `emit_policy` literally in
+`require_approval_for_tools`, because those three publish sensitive annotations
+and must never resolve from a server's own hints. A test asserts that every
+side-effecting control tool is gated, so the harness cannot quietly lose an
+approval card:
+
+```bash
+.venv/bin/python -m pytest tests/test_config.py -q
+```
+
+Enforcement is on the wire rather than in the prompt. A TrueForge agent
+configured with `enable_tools: ["@all"]` that calls a tool the case did not
+approve receives `MCP error -32001: Tool blocked by Airlock policy` from the
+per-case proxy, not a refusal the model could be argued out of.
+
+[Full harness walkthrough below](#running-it-on-trueforge).
+
 ## Hosted page
 
 <https://airlock-mcp.vercel.app>
@@ -126,9 +151,9 @@ The demo script stops before `seal_case`, because sealing is a human decision.
 Sealing and policy emission run through the control MCP with their own approval
 gates. See the audit workflow below.
 
-## Running it from an agent harness
+## Running it on TrueForge
 
-Airlock is itself an MCP server, so a harness drives the whole audit from one
+Airlock is itself an MCP server, so the harness drives the whole audit from one
 chat message.
 
 1. Register the control connector using
