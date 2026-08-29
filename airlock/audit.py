@@ -5,7 +5,7 @@ import hashlib
 import json
 import multiprocessing
 import os
-import select
+import selectors
 import threading
 import sys
 import tempfile
@@ -959,8 +959,8 @@ _STDIO_INHERITED_ENV_VARS = ("HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER")
 _STDIO_STDERR_CAPTURE_BYTES = 8 * 1024
 # Teardown budget for the stderr drain, applied twice at most.
 _STDIO_DRAIN_GRACE_SECONDS = 0.5
-# Windows select() handles sockets only, so a pipe descriptor cannot be polled
-# for readiness there and the drain falls back to blocking reads.
+# Windows readiness APIs exposed by selectors handle sockets rather than pipe
+# descriptors, so a child pipe cannot be polled safely with this implementation.
 _CAN_POLL_PIPES = os.name != "nt"
 
 
@@ -1028,10 +1028,11 @@ class _BoundedStderr:
         self._thread.start()
 
     def _drain(self) -> None:
+        selector = selectors.DefaultSelector()
         try:
+            selector.register(self._read_fd, selectors.EVENT_READ)
             while not self._stop.is_set():
-                ready, _, _ = select.select([self._read_fd], [], [], 0.1)
-                if not ready:
+                if not selector.select(timeout=0.1):
                     continue
                 try:
                     chunk = os.read(self._read_fd, 4096)
@@ -1047,6 +1048,7 @@ class _BoundedStderr:
                     while self._size > self._limit and len(self._chunks) > 1:
                         self._size -= len(self._chunks.popleft())
         finally:
+            selector.close()
             try:
                 os.close(self._read_fd)
             except OSError:

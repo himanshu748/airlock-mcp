@@ -225,6 +225,36 @@ def test_stderr_tail_survives_a_server_that_says_nothing():
     assert errlog.tail() == ""
 
 
+def test_stderr_capture_accepts_a_descriptor_above_select_ceiling(monkeypatch):
+    """A busy process can allocate a valid pipe above FD_SETSIZE."""
+    import os
+
+    import airlock.audit as audit
+
+    fcntl = pytest.importorskip("fcntl")
+    real_pipe = os.pipe
+
+    def high_descriptor_pipe():
+        read_fd, write_fd = real_pipe()
+        try:
+            high_read_fd = fcntl.fcntl(read_fd, fcntl.F_DUPFD, 1024)
+        finally:
+            os.close(read_fd)
+        return high_read_fd, write_fd
+
+    monkeypatch.setattr(audit.os, "pipe", high_descriptor_pipe)
+
+    errlog = audit._BoundedStderr()
+    try:
+        assert errlog._read_fd >= 1024
+        errlog.stream.write(b"high descriptor diagnostic\n")
+        errlog.stream.flush()
+    finally:
+        errlog.close()
+
+    assert "high descriptor diagnostic" in errlog.tail()
+
+
 def test_drain_stops_even_when_a_descendant_holds_stderr():
     """A grandchild inheriting stderr means the pipe never reaches EOF."""
     import os
