@@ -5,9 +5,11 @@ import hashlib
 import json
 import multiprocessing
 import os
+import threading
 import sys
 import tempfile
 from contextlib import asynccontextmanager
+from collections import deque
 from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
@@ -969,6 +971,58 @@ def _stdio_child_environment(workdir: str) -> dict[str, str]:
     return environment
 
 
+class _BoundedStderr:
+    """Drains a child's stderr, keeping only the last bytes.
+
+    The SDK hands errlog straight to the subprocess as its stderr, so it has
+    to be a real file descriptor. Writing that to a file would let a chatty or
+    hostile server fill the disk, and never reading the pipe would let it block
+    once the buffer filled. A pipe drained by a thread into a bounded buffer
+    does neither.
+    """
+
+    def __init__(self, limit: int = _STDIO_STDERR_CAPTURE_BYTES) -> None:
+        self._limit = limit
+        self._chunks: deque[bytes] = deque()
+        self._size = 0
+        self._lock = threading.Lock()
+        self._read_fd, self._write_fd = os.pipe()
+        self._writer = os.fdopen(self._write_fd, "wb", buffering=0)
+        self._thread = threading.Thread(target=self._drain, daemon=True)
+        self._thread.start()
+
+    def _drain(self) -> None:
+        with os.fdopen(self._read_fd, "rb", buffering=0) as reader:
+            while True:
+                try:
+                    chunk = reader.read(4096)
+                except (OSError, ValueError):
+                    return
+                if not chunk:
+                    return
+                with self._lock:
+                    self._chunks.append(chunk)
+                    self._size += len(chunk)
+                    while self._size > self._limit and len(self._chunks) > 1:
+                        self._size -= len(self._chunks.popleft())
+
+    @property
+    def stream(self) -> Any:
+        return self._writer
+
+    def tail(self) -> str:
+        with self._lock:
+            captured = b"".join(self._chunks)
+        return captured[-self._limit :].decode("utf-8", "replace").strip()
+
+    def close(self) -> None:
+        try:
+            self._writer.close()
+        except OSError:
+            pass
+        self._thread.join(timeout=1.0)
+
+
 @asynccontextmanager
 async def _open_stdio_client(stdio_target: StdioTarget):
     with tempfile.TemporaryDirectory(prefix="airlock-stdio-") as workdir:
@@ -979,31 +1033,18 @@ async def _open_stdio_client(stdio_target: StdioTarget):
             cwd=workdir,
         )
         # A server that fails to start says why on stderr. Discarding it left
-        # an operator with a bare transport failure and nothing to act on, so
-        # a bounded tail is kept and surfaced on the exception.
-        stderr_path = os.path.join(workdir, "airlock-stdio-stderr.log")
-        with open(stderr_path, "w+", encoding="utf-8", errors="replace") as errlog:
-            try:
-                async with Client(
-                    stdio_client(parameters, errlog=errlog),
-                    mode="auto",
-                ) as client:
-                    yield client
-            except Exception as exc:
-                raise StdioLaunchError(
-                    stdio_target,
-                    _read_stderr_tail(errlog),
-                ) from exc
-
-
-def _read_stderr_tail(errlog: Any) -> str:
-    try:
-        errlog.flush()
-        errlog.seek(0)
-        captured = errlog.read()
-    except (OSError, ValueError):
-        return ""
-    return captured[-_STDIO_STDERR_CAPTURE_BYTES:].strip()
+        # an operator with a bare transport failure and nothing to act on.
+        errlog = _BoundedStderr()
+        try:
+            async with Client(
+                stdio_client(parameters, errlog=errlog.stream),
+                mode="auto",
+            ) as client:
+                yield client
+        except Exception as exc:
+            raise StdioLaunchError(stdio_target, errlog.tail()) from exc
+        finally:
+            errlog.close()
 
 
 @asynccontextmanager

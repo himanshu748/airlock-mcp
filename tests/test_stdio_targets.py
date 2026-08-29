@@ -184,3 +184,30 @@ def test_child_environment_is_ours_not_the_sdk_default():
     assert environment["LOGNAME"] == ""
     assert environment["SHELL"] == ""
     assert environment["USER"] == ""
+
+
+def test_stderr_capture_is_bounded_and_keeps_the_tail():
+    from airlock.audit import _STDIO_STDERR_CAPTURE_BYTES, _BoundedStderr
+
+    errlog = _BoundedStderr()
+    try:
+        # Far more than the cap, so an unbounded implementation would keep it.
+        for index in range(400):
+            errlog.stream.write(f"line {index} " .encode() + b"x" * 512)
+        errlog.stream.flush()
+    finally:
+        errlog.close()
+
+    tail = errlog.tail()
+    assert len(tail.encode()) <= _STDIO_STDERR_CAPTURE_BYTES
+    # The end is what diagnoses a failure, so that is the part retained.
+    assert "line 399" in tail
+    assert "line 0 " not in tail
+
+
+def test_stderr_tail_survives_a_server_that_says_nothing():
+    from airlock.audit import _BoundedStderr
+
+    errlog = _BoundedStderr()
+    errlog.close()
+    assert errlog.tail() == ""
