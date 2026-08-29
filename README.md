@@ -481,11 +481,15 @@ in hand.
 .venv/bin/python -m pytest -q
 ```
 
-271 tests covering domain invariants, evidence persistence, schema-driven
+294 tests covering domain invariants, evidence persistence, schema-driven
 probes, all detector outcomes, honest and dishonest fixtures, the control MCP,
 target validation, DNS pinning, modern and legacy MCP proxy routing, streamed
-responses, enforcement, policy emission, the read API and the operator
-interface's no-markup, no-external-request and language-discipline properties.
+responses, enforcement, policy emission, stdio target resolution and
+revalidation, the read API and the operator interface's no-markup,
+no-external-request and language-discipline properties.
+
+Every push and pull request runs the same command on GitHub Actions, so the
+count above is recorded publicly rather than asserted here.
 
 ## License
 
