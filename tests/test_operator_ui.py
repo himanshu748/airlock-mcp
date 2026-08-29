@@ -26,9 +26,23 @@ def _source_files() -> list[Path]:
     ]
 
 
+# Importing the TypeScript module directly needs type stripping, which Node
+# only performs unflagged from 22.18. Asking for it explicitly keeps the test
+# running on every Node that can strip types at all rather than only the newest.
+_NODE_TYPE_STRIPPING = "--experimental-strip-types"
+
+
 def _run_api_module(script: str, **environment: str) -> list[str]:
     result = subprocess.run(
-        ["node", "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", "--input-type=module", "-e", script],
+        [
+            "node",
+            "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+            "--disable-warning=ExperimentalWarning",
+            _NODE_TYPE_STRIPPING,
+            "--input-type=module",
+            "-e",
+            script,
+        ],
         cwd=ROOT,
         env={**os.environ, **environment},
         check=True,
