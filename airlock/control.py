@@ -76,9 +76,9 @@ _SENSITIVE_STATEFUL = ToolAnnotations(
     idempotent_hint=False,
     open_world_hint=False,
 )
-# The agent spec has to gate every destructive control tool, and a hand-copied
-# list in a test would drift the first time a tool is added. This is the one
-# place both the decorators and that check read from.
+# The one source of truth for control tool annotations. The decorators below
+# read from it and the approval-gate test classifies from it, so a tool cannot
+# become destructive in one place while still looking safe in the other.
 CONTROL_TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "open_case": _REMOTE_STATEFUL,
     "list_declared_tools": _REMOTE_STATEFUL,
@@ -338,7 +338,7 @@ def create_control_server(
     @server.tool(
         name="open_case",
         description="Validate a target URL and create a persistent Airlock audit case.",
-        annotations=_REMOTE_STATEFUL,
+        annotations=CONTROL_TOOL_ANNOTATIONS["open_case"],
     )
     @_anticipated_errors
     async def open_case(
@@ -391,7 +391,7 @@ def create_control_server(
             "Inventory tools/list once, bind the case to that catalog and return "
             "opaque tool IDs, safe annotations and declaration digests."
         ),
-        annotations=_REMOTE_STATEFUL,
+        annotations=CONTROL_TOOL_ANNOTATIONS["list_declared_tools"],
     )
     @_anticipated_errors
     async def list_declared_tools(case_id: str) -> dict[str, Any]:
@@ -406,7 +406,7 @@ def create_control_server(
             "Exercise one inventoried opaque tool ID with a capped audit probe "
             "budget. The target can perform side effects."
         ),
-        annotations=_SENSITIVE_REMOTE,
+        annotations=CONTROL_TOOL_ANNOTATIONS["probe_tool"],
     )
     @_anticipated_errors
     async def probe_tool(
@@ -441,7 +441,7 @@ def create_control_server(
             "Return detector findings and bounded observation provenance without raw "
             "suspect tool-result bodies."
         ),
-        annotations=_READ_ONLY,
+        annotations=CONTROL_TOOL_ANNOTATIONS["read_evidence"],
     )
     @_anticipated_errors
     async def read_evidence(
@@ -464,7 +464,7 @@ def create_control_server(
             "enforcement. Configure the MCP client to require human approval for "
             "this tool."
         ),
-        annotations=_SENSITIVE_STATEFUL,
+        annotations=CONTROL_TOOL_ANNOTATIONS["seal_case"],
     )
     @_anticipated_errors
     async def seal_case(
@@ -531,7 +531,7 @@ def create_control_server(
             "sealed, allowed case. Configure the MCP client to require human "
             "approval for this tool."
         ),
-        annotations=_SENSITIVE_STATEFUL,
+        annotations=CONTROL_TOOL_ANNOTATIONS["emit_policy"],
     )
     @_anticipated_errors
     async def emit_policy(case_id: str, connector_name: str) -> dict[str, Any]:

@@ -26,7 +26,7 @@ def _gated_tools() -> set[str]:
 def test_the_annotation_map_covers_every_registered_control_tool():
     """Without this, a new tool could skip the map and dodge the gate check."""
     registered = set(
-        re.findall(r'@server\.tool\(\s*name="([a-z_]+)"', CONTROL_SOURCE.read_text())
+        re.findall(r'@server\.tool\(\s*\n\s*name="([a-z_]+)"', CONTROL_SOURCE.read_text())
     )
 
     assert registered, "no control tools were found in the source"
@@ -60,3 +60,14 @@ def test_the_gate_names_no_tool_that_does_not_exist():
 @pytest.mark.parametrize("tool", ["probe_tool", "seal_case", "emit_policy"])
 def test_the_three_publishing_tools_stay_gated(tool: str):
     assert tool in _gated_tools()
+
+
+def test_no_decorator_supplies_annotations_outside_the_map():
+    """A literal annotation on a decorator is how the two drift apart."""
+    source = CONTROL_SOURCE.read_text()
+    literal = re.findall(r"annotations=(_[A-Z_]+),", source)
+
+    assert not literal, (
+        "these tools annotate outside CONTROL_TOOL_ANNOTATIONS and can drift "
+        f"from what the gate test checks: {sorted(set(literal))}"
+    )

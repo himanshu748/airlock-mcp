@@ -523,6 +523,43 @@ no-external-request and language-discipline properties.
 Every push and pull request runs the same command on GitHub Actions, so the
 count above is recorded publicly rather than asserted here.
 
+## Qodo review trail
+
+Every substantive change went through a pull request reviewed by Qodo before
+merge. Thirteen are merged, and the reviews changed the code rather than
+rubber-stamping it. Three that mattered:
+
+**[#9](https://github.com/himanshu748/airlock-mcp/pull/9), stdio transport.**
+Qodo found four real bugs, two of them security. Revalidation compared only the
+target name, so re-pointing a name left an open case executing a command the
+operator had withdrawn. The child environment was not ours either: the MCP SDK
+merges the supplied mapping over a default that inherits `HOME`, `LOGNAME`,
+`PATH`, `SHELL`, `TERM` and `USER`, so naming three of them left the operator's
+shell leaking in and made this README's earlier claim false. Both fixed with
+regression tests. A fifth finding, that the response cap does not apply to
+stdio, is documented as a limit rather than papered over, because the stdio
+transport belongs to the SDK.
+
+**[#14](https://github.com/himanshu748/airlock-mcp/pull/14), the approval gate.**
+Qodo caught this README claiming a test asserted every side-effecting control
+tool was gated when the test checked three hard-coded names, then caught the
+first fix too: a map that duplicated what the decorators passed could drift, so
+a tool could become destructive in one place while still looking safe to the
+test. The decorators now read from that map, and a test fails if any of them
+annotates outside it.
+
+**[#12](https://github.com/himanshu748/airlock-mcp/pull/12), recorded testing.**
+Adding CI immediately disproved a claim: the suite was reported passing while
+two tests failed on a clean machine, fixed in
+[#11](https://github.com/himanshu748/airlock-mcp/pull/11).
+
+The pattern is the point. Every review above caught a claim that did not match
+observed behaviour, which is the failure this project exists to detect.
+
+Full history: [merged pull requests](https://github.com/himanshu748/airlock-mcp/pulls?q=is%3Apr+is%3Amerged).
+
+Built for the WeMakeDevs Agent Harness Hackathon.
+
 ## License
 
 MIT
