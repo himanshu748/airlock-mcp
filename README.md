@@ -42,6 +42,23 @@ configured with `enable_tools: ["@all"]` that calls a tool the case did not
 approve receives `MCP error -32001: Tool blocked by Airlock policy` from the
 per-case proxy, not a refusal the model could be argued out of.
 
+Verified against a running TrueForge 0.1.4 instance rather than a mock. The
+harness registered this control server over the wire and read all six tools,
+seeing exactly the three that require an approval card as destructive:
+
+```
+open_case            destructiveHint: False
+list_declared_tools  destructiveHint: False
+probe_tool           destructiveHint: True
+read_evidence        destructiveHint: False   readOnlyHint: True
+seal_case            destructiveHint: True
+emit_policy          destructiveHint: True
+```
+
+That transcript is recorded in
+[`evidence/trueforge-integration.json`](evidence/trueforge-integration.json).
+It does not cover the approval card rendering, which needs a model-driven turn.
+
 [Full harness walkthrough below](#running-it-on-trueforge).
 
 ## Hosted page
