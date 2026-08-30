@@ -525,7 +525,7 @@ no-external-request and language-discipline properties.
 Every push and pull request runs the same command on GitHub Actions, so the
 count above is recorded publicly rather than asserted here.
 
-## Qodo review trail
+## Qodo Code Review Evidence
 
 Every substantive change went through a pull request reviewed by Qodo before
 merge. Thirteen are merged, and the reviews changed the code rather than
@@ -558,9 +558,36 @@ two tests failed on a clean machine, fixed in
 The pattern is the point. Every review above caught a claim that did not match
 observed behaviour, which is the failure this project exists to detect.
 
+Each was re-reviewed after the fix and merged only once Qodo reported no
+remaining issues against the final code.
+[#14](https://github.com/himanshu748/airlock-mcp/pull/14) is the clearest trail:
+four rounds, each fix reviewed again, the last two rounds catching problems
+introduced by the previous fix, then a final review reporting zero bugs.
+
+One finding was answered by argument rather than code. Qodo reported that the
+stdio transport bypasses `AIRLOCK_MAX_AUDIT_RESPONSE_BYTES`. That is correct and
+it is not fixed: the cap is enforced by the HTTP transport, the stdio transport
+belongs to the MCP SDK, and it buffers a line before Airlock sees it. Wrapping
+it in something that resembles a bound without being one would be worse than
+saying so, and the limit is documented above.
+
 Full history: [merged pull requests](https://github.com/himanshu748/airlock-mcp/pulls?q=is%3Apr+is%3Amerged).
 
 Built for the WeMakeDevs Agent Harness Hackathon.
+
+## AI assistance disclosure
+
+This project was built with AI coding assistants, primarily Claude Code, used
+for implementation, refactoring and documentation under review.
+
+Every change went through a pull request reviewed by Qodo before merge, and the
+findings above are the record of that. The design decisions are mine: auditing
+observed behaviour rather than declared annotations, enforcing on the wire
+through a per-case proxy rather than in the prompt, gating the three publishing
+tools so approval never resolves from a server's own hints, and refusing to
+report a server as safe at all. Where the assistant produced something that
+claimed more than the sensors could establish, the reviews above show it being
+caught and corrected.
 
 ## License
 
