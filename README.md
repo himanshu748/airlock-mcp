@@ -513,7 +513,7 @@ in hand.
 .venv/bin/python -m pytest -q
 ```
 
-299 tests covering domain invariants, evidence persistence, schema-driven
+300 tests covering domain invariants, evidence persistence, schema-driven
 probes, all detector outcomes, honest and dishonest fixtures, the control MCP,
 target validation, DNS pinning, modern and legacy MCP proxy routing, streamed
 responses, enforcement, policy emission, stdio target resolution and
