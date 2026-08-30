@@ -118,5 +118,5 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -q
 ```
 
-300 tests pass. The README's quickstart runs a full fixture audit in two
+302 tests pass. The README's quickstart runs a full fixture audit in two
 commands.
