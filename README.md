@@ -609,6 +609,11 @@ report a server as safe at all. Where the assistant produced something that
 claimed more than the sensors could establish, the reviews above show it being
 caught and corrected.
 
+The demo video's voiceover is synthesised with Deepgram Aura, from a script
+written for it. The footage under that narration is not synthesised: it is a
+screen capture of the audit in this repository running against the bundled
+dishonest fixture, and of a TrueForge instance reading this server's tools.
+
 ## License
 
 MIT
