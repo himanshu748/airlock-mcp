@@ -149,7 +149,18 @@ export default function LandingPage() {
             </div>
 
             <p className="mt-7 font-mono text-[12.5px] leading-relaxed text-pencil">
-              Verified against a running TrueForge instance, not a mock.
+              Two recorded runs, both real executions. A server built to lie,
+              caught claiming read-only while Airlock observed it writing to
+              disk. And{" "}
+              <span className="text-form">
+                @modelcontextprotocol/server-memory
+              </span>
+              , a widely used public server, where Airlock found nothing and
+              said so: 0 findings, 39 of 54 checks marked not tested because
+              transcript-only evidence has no sensors to establish them.
+            </p>
+            <p className="mt-3 font-mono text-[12.5px] leading-relaxed text-pencil">
+              Source: <span className="text-form">github.com/himanshu748/airlock-mcp</span>
             </p>
           </div>
 
@@ -364,7 +375,8 @@ export default function LandingPage() {
             {DISCLAIMER}
           </p>
           <p className="font-mono text-[12px] text-pencil">
-            Agent Harness Hackathon · WeMakeDevs x TrueFoundry
+            github.com/himanshu748/airlock-mcp · Agent Harness Hackathon ·
+            WeMakeDevs x TrueFoundry
           </p>
         </div>
       </footer>

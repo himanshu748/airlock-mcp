@@ -12,6 +12,38 @@ the policy is applied on the wire rather than trusted to the client.
 
 > Airlock reports what it observed. Absence of a finding is not proof of safety.
 
+## Built for TrueForge
+
+Airlock is itself an MCP server, so a TrueForge agent drives the entire audit
+from one chat message: open the case, inventory the tools, probe each one, read
+the evidence, then decide. The agent spec is
+[`configs/trueforge-agent.json`](configs/trueforge-agent.json) and the skill is
+[`skills/airlock-audit/SKILL.md`](skills/airlock-audit/SKILL.md).
+
+The spec names `probe_tool`, `seal_case` and `emit_policy` literally in
+`require_approval_for_tools`, because those three are the control tools
+annotated destructive: they exercise a live server, seal a case or publish a
+policy. `open_case` and `list_declared_tools` change state too but are not
+gated, because neither touches the audited server or emits anything.
+
+The gate is not a hand-copied list, and it is not read out of the source
+either. The tests build the control server and ask it what it registered, so a
+tool cannot dodge the check by spelling its registration differently. One test
+asserts every destructive tool appears in the spec, and another pins the three
+above as destructive, because relaxing an annotation would otherwise ungate a
+tool without failing anything:
+
+```bash
+.venv/bin/python -m pytest tests/test_config.py -q
+```
+
+Enforcement is on the wire rather than in the prompt. A TrueForge agent
+configured with `enable_tools: ["@all"]` that calls a tool the case did not
+approve receives `MCP error -32001: Tool blocked by Airlock policy` from the
+per-case proxy, not a refusal the model could be argued out of.
+
+[Full harness walkthrough below](#running-it-on-trueforge).
+
 ## Hosted page
 
 <https://airlock-mcp.vercel.app>
@@ -126,9 +158,9 @@ The demo script stops before `seal_case`, because sealing is a human decision.
 Sealing and policy emission run through the control MCP with their own approval
 gates. See the audit workflow below.
 
-## Running it from an agent harness
+## Running it on TrueForge
 
-Airlock is itself an MCP server, so a harness drives the whole audit from one
+Airlock is itself an MCP server, so the harness drives the whole audit from one
 chat message.
 
 1. Register the control connector using
@@ -483,7 +515,7 @@ in hand.
 .venv/bin/python -m pytest -q
 ```
 
-294 tests covering domain invariants, evidence persistence, schema-driven
+302 tests covering domain invariants, evidence persistence, schema-driven
 probes, all detector outcomes, honest and dishonest fixtures, the control MCP,
 target validation, DNS pinning, modern and legacy MCP proxy routing, streamed
 responses, enforcement, policy emission, stdio target resolution and
@@ -492,6 +524,43 @@ no-external-request and language-discipline properties.
 
 Every push and pull request runs the same command on GitHub Actions, so the
 count above is recorded publicly rather than asserted here.
+
+## Qodo review trail
+
+Every substantive change went through a pull request reviewed by Qodo before
+merge. Thirteen are merged, and the reviews changed the code rather than
+rubber-stamping it. Three that mattered:
+
+**[#9](https://github.com/himanshu748/airlock-mcp/pull/9), stdio transport.**
+Qodo found four real bugs, two of them security. Revalidation compared only the
+target name, so re-pointing a name left an open case executing a command the
+operator had withdrawn. The child environment was not ours either: the MCP SDK
+merges the supplied mapping over a default that inherits `HOME`, `LOGNAME`,
+`PATH`, `SHELL`, `TERM` and `USER`, so naming three of them left the operator's
+shell leaking in and made this README's earlier claim false. Both fixed with
+regression tests. A fifth finding, that the response cap does not apply to
+stdio, is documented as a limit rather than papered over, because the stdio
+transport belongs to the SDK.
+
+**[#14](https://github.com/himanshu748/airlock-mcp/pull/14), the approval gate.**
+Qodo caught this README claiming a test asserted every side-effecting control
+tool was gated when the test checked three hard-coded names, then caught the
+first fix too: a map that duplicated what the decorators passed could drift, so
+a tool could become destructive in one place while still looking safe to the
+test. The decorators now read from that map, and a test fails if any of them
+annotates outside it.
+
+**[#12](https://github.com/himanshu748/airlock-mcp/pull/12), recorded testing.**
+Adding CI immediately disproved a claim: the suite was reported passing while
+two tests failed on a clean machine, fixed in
+[#11](https://github.com/himanshu748/airlock-mcp/pull/11).
+
+The pattern is the point. Every review above caught a claim that did not match
+observed behaviour, which is the failure this project exists to detect.
+
+Full history: [merged pull requests](https://github.com/himanshu748/airlock-mcp/pulls?q=is%3Apr+is%3Amerged).
+
+Built for the WeMakeDevs Agent Harness Hackathon.
 
 ## License
 
