@@ -1,0 +1,48 @@
+{
+  "kind": "airlock.trueforge-integration-check",
+  "harness": "@truefoundry/trueforge@0.1.4",
+  "harnessEndpoint": "http://127.0.0.1:8790",
+  "registeredAs": "airlock-control",
+  "transport": "remote streamable-http",
+  "toolsRead": [
+    {
+      "name": "open_case",
+      "destructiveHint": false,
+      "readOnlyHint": false
+    },
+    {
+      "name": "list_declared_tools",
+      "destructiveHint": false,
+      "readOnlyHint": false
+    },
+    {
+      "name": "probe_tool",
+      "destructiveHint": true,
+      "readOnlyHint": false
+    },
+    {
+      "name": "read_evidence",
+      "destructiveHint": false,
+      "readOnlyHint": true
+    },
+    {
+      "name": "seal_case",
+      "destructiveHint": true,
+      "readOnlyHint": false
+    },
+    {
+      "name": "emit_policy",
+      "destructiveHint": true,
+      "readOnlyHint": false
+    }
+  ],
+  "gatedInAgentSpec": [
+    "probe_tool",
+    "seal_case",
+    "emit_policy"
+  ],
+  "whatThisShows": "A running TrueForge instance registered Airlock's control MCP over the wire and read every tool with the annotations that drive its approval gating. The three tools named in require_approval_for_tools are the three the harness sees as destructive.",
+  "whatThisDoesNotShow": "The approval card rendering itself, which needs a model-driven agent turn and is not exercised here.",
+  "rawTranscript": "evidence/trueforge-integration.txt",
+  "note": "The JSON here is a summary. The verbatim harness responses it summarises are in the .txt file beside it, captured from the running instance."
+}

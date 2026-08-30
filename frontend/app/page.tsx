@@ -160,6 +160,12 @@ export default function LandingPage() {
               transcript-only evidence has no sensors to establish them.
             </p>
             <p className="mt-3 font-mono text-[12.5px] leading-relaxed text-pencil">
+              Verified against a running TrueForge 0.1.4 instance, not a mock:
+              the harness registered this control server over the wire and read
+              all six tools, seeing exactly the three that require an approval
+              card as destructive.
+            </p>
+            <p className="mt-3 font-mono text-[12.5px] leading-relaxed text-pencil">
               Source: <span className="text-form">github.com/himanshu748/airlock-mcp</span>
             </p>
           </div>
