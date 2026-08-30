@@ -55,9 +55,12 @@ seal_case            destructiveHint: True
 emit_policy          destructiveHint: True
 ```
 
-That transcript is recorded in
+The verbatim harness responses are in
+[`evidence/trueforge-integration.txt`](evidence/trueforge-integration.txt), with
+a summary beside them in
 [`evidence/trueforge-integration.json`](evidence/trueforge-integration.json).
-It does not cover the approval card rendering, which needs a model-driven turn.
+This does not cover the approval pause itself, which needs a model-driven turn
+and remains an open item in the backend handoff.
 
 [Full harness walkthrough below](#running-it-on-trueforge).
 

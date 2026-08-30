@@ -42,5 +42,7 @@
     "emit_policy"
   ],
   "whatThisShows": "A running TrueForge instance registered Airlock's control MCP over the wire and read every tool with the annotations that drive its approval gating. The three tools named in require_approval_for_tools are the three the harness sees as destructive.",
-  "whatThisDoesNotShow": "The approval card rendering itself, which needs a model-driven agent turn and is not exercised here."
+  "whatThisDoesNotShow": "The approval card rendering itself, which needs a model-driven agent turn and is not exercised here.",
+  "rawTranscript": "evidence/trueforge-integration.txt",
+  "note": "The JSON here is a summary. The verbatim harness responses it summarises are in the .txt file beside it, captured from the running instance."
 }
