@@ -528,8 +528,8 @@ count above is recorded publicly rather than asserted here.
 ## Qodo Code Review Evidence
 
 Every substantive change went through a pull request reviewed by Qodo before
-merge. Thirteen are merged, and the reviews changed the code rather than
-rubber-stamping it. Three that mattered:
+merge, and the reviews changed the code rather than rubber-stamping it. Three
+that mattered:
 
 **[#9](https://github.com/himanshu748/airlock-mcp/pull/9), stdio transport.**
 Qodo found four real bugs, two of them security. Revalidation compared only the

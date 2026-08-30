@@ -65,8 +65,8 @@ registered, rather than trusting a hand-copied list.
 
 ## How did you use Qodo in your project?
 
-Fourteen pull requests, every substantive change reviewed by Qodo before merge.
-The reviews changed the code rather than rubber-stamping it.
+Every substantive change went through a pull request reviewed by Qodo before
+merge. The reviews changed the code rather than rubber-stamping it.
 
 - **[#9](https://github.com/himanshu748/airlock-mcp/pull/9)** four real bugs in
   the stdio transport, two of them security. Revalidation compared only the
